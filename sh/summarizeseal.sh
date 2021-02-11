@@ -1,5 +1,4 @@
 #!/bin/bash
-#summarizeseal in=<infile>
 
 usage(){
 echo "
@@ -20,24 +19,24 @@ barcode,library,tax,location
 For example:
 6-G,N0296,gammaproteobacteria_bacterium,deep_ocean
 
-
 Usage:  summarizeseal.sh in=<file,file...> out=<file>
 
 You can alternately run 'summarizeseal.sh *.txt out=out.txt'
 
 Parameters:
-in=<file>             A list of stats files, or a text file containing one stats file name per line.
-out=<file>            Destination for summary.
-printtotal=t          (pt) Print a line summarizing the total contamination rate of all assemblies.
-ignoresametaxa=f      Ignore secondary hits sharing taxonomy. 
-ignoresamebarcode=f   Ignore secondary hits sharing a barcode.
-ignoresamelocation=f  Ignore secondary hits sharing a sampling site.
-totaldenominator=f    (td) Use all bases as denominator rather than mapped bases.
+in=<file>              A list of stats files, or a text file containing one stats file name per line.
+out=<file>             Destination for summary.
+printtotal=t           (pt) Print a line summarizing the total contamination rate of all assemblies.
+ignoresametaxa=f       Ignore secondary hits sharing taxonomy. 
+ignoresamebarcode=f    Ignore secondary hits sharing a barcode.
+ignoresamelocation=f   Ignore secondary hits sharing a sampling site.
+totaldenominator=f     (td) Use all bases as denominator rather than mapped bases.
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -52,7 +51,6 @@ popd > /dev/null
 CP="$DIR""current/"
 
 z="-Xmx120m"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -60,13 +58,15 @@ if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
 	exit
 fi
 
+calcXmx () {
+	source "$DIR""/calcmem.sh"
+	setEnvironment
+	parseXmx "$@"
+}
+calcXmx "$@"
+
 summarizeseal() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-	fi
-	local CMD="java $EA $z -cp $CP driver.SummarizeSealStats $@"
+	local CMD="java $EA $EOOM $z -cp $CP driver.SummarizeSealStats $@"
 #	echo $CMD >&2
 	eval $CMD
 }

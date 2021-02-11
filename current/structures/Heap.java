@@ -1,18 +1,40 @@
 package structures;
 
+import java.util.ArrayList;
+
 public final class Heap<T extends Comparable<? super T>> {
 	
-	public Heap(int maxSize){
+	@SuppressWarnings("unchecked")
+	public Heap(int maxSize, boolean rollover_){
 		
 		int len=maxSize+1;
 		if((len&1)==1){len++;} //Array size is always even.
 		
 		CAPACITY=maxSize;
 		array=(T[])new Comparable[len];
+		rollover=rollover_;
 //		queue=new PriorityQueue<T>(maxSize);
 	}
 	
 	public boolean add(T t){
+		
+		assert(size==0 || array[size]!=null);
+		assert(rollover || size<CAPACITY);
+		
+		if(size>=CAPACITY){
+			
+			if(t.compareTo(array[1])<=0){return false;}
+			
+			poll(); //Turns into a rolling buffer by removing smallest value.
+			
+//			{//This is a more efficient alternative to poll() and percDown(), but the result is slightly different.
+//				array[1]=t;
+//				percUp(1);
+//				return true;
+//			}
+		}
+		assert(size<CAPACITY);
+		
 		//assert(testForDuplicates());
 //		assert(queue.size()==size);
 //		queue.add(t);
@@ -105,6 +127,10 @@ public final class Heap<T extends Comparable<? super T>> {
 		return size==0;
 	}
 	
+	public boolean hasRoom(){
+		return size<CAPACITY;
+	}
+	
 	public void clear(){
 //		queue.clear();
 		for(int i=1; i<=size; i++){array[i]=null;}
@@ -129,8 +155,18 @@ public final class Heap<T extends Comparable<? super T>> {
 		return true;
 	}
 	
+	public ArrayList<T> toList(){
+		ArrayList<T> list=new ArrayList<T>(size);
+		for(int i=0, lim=size; i<lim; i++){
+			list.add(poll());
+		}
+		assert(isEmpty());
+		return list;
+	}
+	
 	private final T[] array;
 	private final int CAPACITY;
+	private final boolean rollover;
 	private int size=0;
 	
 //	private PriorityQueue<T> queue;

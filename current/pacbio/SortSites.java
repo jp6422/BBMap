@@ -2,19 +2,17 @@ package pacbio;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 
-import stream.SiteScoreR;
-
-
-import align2.Tools;
 import dna.Data;
-import dna.Parser;
-import dna.Timer;
 import fileIO.TextFile;
 import fileIO.TextStreamWriter;
+import shared.Parse;
+import shared.PreParser;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
+import stream.SiteScoreR;
 
 /**
  * @author Brian Bushnell
@@ -25,7 +23,12 @@ public class SortSites {
 	
 	
 	public static void main(String[] args){
-		System.err.println("Executing "+(new Object() { }.getClass().getEnclosingClass().getName())+" "+Arrays.toString(args)+"\n");
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
+		
 		Timer t=new Timer();
 		
 		String tempname=null;
@@ -36,20 +39,18 @@ public class SortSites {
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
 			
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(a.equals("genome") || a.equals("build")){
+			if(a.equals("genome") || a.equals("build")){
 				Data.setGenome(Integer.parseInt(b)); //Not needed
 			}else if(a.equals("tempname")){
 				tempname=b;
 			}else if(a.equals("deletefiles") || a.startsWith("deletetemp") || a.equals("delete")){
-				DELETE_TEMP=(Tools.parseBoolean(b));
+				DELETE_TEMP=(Parse.parseBoolean(b));
 			}else if(a.equals("mode")){
 				POSITIONMODE=(b.contains("position") || b.contains("location"));
 			}else if(a.equals("blocksize")){
 				BLOCKSIZE=(Integer.parseInt(b));
 			}else if(a.equals("ignoreperfect")){
-				IGNORE_PERFECT_SITES=(Tools.parseBoolean(b));
+				IGNORE_PERFECT_SITES=(Parse.parseBoolean(b));
 			}else{
 				throw new RuntimeException("Unknown parameter "+args[i]);
 			}
@@ -68,7 +69,7 @@ public class SortSites {
 	
 	public static void stack(String fname1, String outname, String tempname){
 
-		TextFile tf=new TextFile(fname1, false, false);
+		TextFile tf=new TextFile(fname1, false);
 
 		for(String s=tf.nextLine(); s!=null; s=tf.nextLine()){
 
@@ -130,7 +131,7 @@ public class SortSites {
 		out.start();
 		ArrayList<Long> keys=new ArrayList<Long>(wmap.size());
 		keys.addAll(wmap.keySet());
-		Collections.sort(keys);
+		Shared.sort(keys);
 		for(Long k : keys){
 			TextStreamWriter tsw=wmap.get(k);
 			tsw.poison();
@@ -173,14 +174,14 @@ public class SortSites {
 				assert(false);
 			}
 			
-			TextFile tf=new TextFile(fname, false, false);
+			TextFile tf=new TextFile(fname, false);
 			ArrayList<SiteScoreR> list=new ArrayList<SiteScoreR>(1000);
 			for(String s=tf.nextLine(); s!=null; s=tf.nextLine()){list.add(SiteScoreR.fromText(s));}
 			tf.close();
 			if(DELETE_TEMP){
 				new File(fname).delete();
 			}
-			Collections.sort(list, SiteScoreR.PCOMP);
+			Shared.sort(list, SiteScoreR.PCOMP);
 			
 			final int lim=list.size();
 			for(int i=0; i<lim; i++){
@@ -241,14 +242,14 @@ public class SortSites {
 				assert(false);
 			}
 			
-			TextFile tf=new TextFile(fname, false, false);
+			TextFile tf=new TextFile(fname, false);
 			ArrayList<SiteScoreR> list=new ArrayList<SiteScoreR>(1000);
 			for(String s=tf.nextLine(); s!=null; s=tf.nextLine()){list.add(SiteScoreR.fromText(s));}
 			tf.close();
 			if(DELETE_TEMP){
 				new File(fname).delete();
 			}
-			Collections.sort(list, SiteScoreR.IDCOMP);
+			Shared.sort(list, SiteScoreR.IDCOMP);
 			
 			final int lim=list.size();
 			for(int i=0; i<lim; i++){

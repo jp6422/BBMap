@@ -3,23 +3,24 @@ package jgi;
 import java.io.File;
 import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 
+import fileIO.ByteFile;
+import fileIO.FileFormat;
+import fileIO.ReadWrite;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 import stream.ConcurrentReadInputStream;
+import stream.ConcurrentReadOutputStream;
 import stream.FASTQ;
 import stream.FastaReadInputStream;
-import stream.ConcurrentReadOutputStream;
 import stream.Read;
 import stream.SamLine;
 import structures.ListNum;
-import dna.Parser;
-import dna.Timer;
-import fileIO.ByteFile;
-import fileIO.ReadWrite;
-import fileIO.FileFormat;
-import align2.ReadStats;
-import align2.Shared;
-import align2.Tools;
 
 /**
  * @author Brian Bushnell
@@ -38,8 +39,11 @@ public class PartitionReads {
 	 */
 	public static void main(String[] args){
 		Timer t=new Timer();
-		PartitionReads as=new PartitionReads(args);
-		as.process(t);
+		PartitionReads x=new PartitionReads(args);
+		x.process(t);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(x.outstream);
 	}
 	
 	/**
@@ -48,22 +52,16 @@ public class PartitionReads {
 	 */
 	public PartitionReads(String[] args){
 		
-		//Process any config files
-		args=Parser.parseConfig(args);
-		
-		//Detect whether the uses needs help
-		if(Parser.parseHelp(args, true)){
-			printOptions();
-			System.exit(0);
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
 		}
-		
-		//Print the program name and arguments
-		outstream.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
 		
 		boolean setInterleaved=false; //Whether interleaved was explicitly set.
 		
-		//Set some shared static variables regarding PIGZ
-		Shared.READ_BUFFER_LENGTH=Tools.max(400, Shared.READ_BUFFER_LENGTH);
+		//Set shared static variables
+		Shared.setBufferLen(Tools.max(400, Shared.bufferLen()));
 		Shared.capBuffers(2);
 		ReadWrite.USE_PIGZ=ReadWrite.USE_UNPIGZ=true;
 		ReadWrite.MAX_ZIP_THREADS=Shared.threads();
@@ -82,18 +80,17 @@ public class PartitionReads {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if(b==null || b.equalsIgnoreCase("null")){b=null;}
-			while(a.startsWith("-")){a=a.substring(1);} //Strip leading hyphens
 			
-			
-			if(parser.parse(arg, a, b)){//Parse standard flags in the parser
-				//do nothing
-			}else if(a.equals("verbose")){
-				verbose=Tools.parseBoolean(b);
+			if(a.equals("verbose")){
+				verbose=Parse.parseBoolean(b);
 			}else if(a.equals("ways")){
 				ways=Integer.parseInt(b);
+			}else if(a.equalsIgnoreCase("pacbio") || a.equals("subreads")){
+				pacBioMode=Parse.parseBoolean(b);
 			}else if(a.equals("parse_flag_goes_here")){
 				//Set a variable here
+			}else if(parser.parse(arg, a, b)){//Parse standard flags in the parser
+				//do nothing
 			}else{
 				outstream.println("Unknown parameter "+args[i]);
 				assert(false) : "Unknown parameter "+args[i];
@@ -159,10 +156,7 @@ public class PartitionReads {
 		assert(FastaReadInputStream.settingsOK());
 		
 		//Ensure there is an input file
-		if(in1==null){
-			printOptions();
-			throw new RuntimeException("Error - at least one input file is required.");
-		}
+		if(in1==null){throw new RuntimeException("Error - at least one input file is required.");}
 		
 		//Adjust the number of threads for input file reading
 		if(!ByteFile.FORCE_MODE_BF1 && !ByteFile.FORCE_MODE_BF2 && Shared.threads()>2){
@@ -170,12 +164,7 @@ public class PartitionReads {
 		}
 		
 		//Ensure out2 is not set without out1
-		if(out1==null){
-			if(out2!=null){
-				printOptions();
-				throw new RuntimeException("Error - cannot define out2 without defining out1.");
-			}
-		}
+		if(out1==null && out2!=null){throw new RuntimeException("Error - cannot define out2 without defining out1.");}
 		
 		//Adjust interleaved settings based on number of output files
 		if(!setInterleaved){
@@ -205,7 +194,7 @@ public class PartitionReads {
 		
 		//Ensure input files can be read
 		if(!Tools.testInputFiles(false, true, in1, in2)){
-			throw new RuntimeException("\nCan't read to some input files.\n");
+			throw new RuntimeException("\nCan't read some input files.\n");  
 		}
 		
 		//Ensure that no file was specified multiple times
@@ -214,18 +203,23 @@ public class PartitionReads {
 		}
 		
 		//Create output FileFormat objects
-		ffout1=new FileFormat[ways];
-		ffout2=new FileFormat[ways];
-		qfout1Array=new String[ways];
-		qfout2Array=new String[ways];
-		for(int i=0; i<ways; i++){
-			String temp1=out1==null ? null : out1.replaceFirst("%", ""+i);
-			String temp2=out2==null ? null : out2.replaceFirst("%", ""+i);
-			ffout1[i]=FileFormat.testOutput(temp1, FileFormat.FASTQ, extout, true, overwrite, append, ordered);
-			ffout2[i]=FileFormat.testOutput(temp2, FileFormat.FASTQ, extout, true, overwrite, append, ordered);
+		if(out1==null){
+			ffout1=ffout2=null;
+			qfout1Array=qfout2Array=null;
+		}else{
+			ffout1=new FileFormat[ways];
+			ffout2=new FileFormat[ways];
+			qfout1Array=new String[ways];
+			qfout2Array=new String[ways];
+			for(int i=0; i<ways; i++){
+				String temp1=out1==null ? null : out1.replaceFirst("%", ""+i);
+				String temp2=out2==null ? null : out2.replaceFirst("%", ""+i);
+				ffout1[i]=FileFormat.testOutput(temp1, FileFormat.FASTQ, extout, true, overwrite, append, false);
+				ffout2[i]=FileFormat.testOutput(temp2, FileFormat.FASTQ, extout, true, overwrite, append, false);
 
-			qfout1Array[i]=qfout1==null ? null : qfout1.replaceFirst("%", ""+i);
-			qfout2Array[i]=qfout2==null ? null : qfout2.replaceFirst("%", ""+i);
+				qfout1Array[i]=qfout1==null ? null : qfout1.replaceFirst("%", ""+i);
+				qfout2Array[i]=qfout2==null ? null : qfout2.replaceFirst("%", ""+i);
+			}
 		}
 		
 		//Create input FileFormat objects
@@ -253,15 +247,16 @@ public class PartitionReads {
 		if(!ffin1.samOrBam()){outstream.println("Input is being processed as "+(paired ? "paired" : "unpaired"));}
 		
 		//Optionally create a read output stream
-		final ConcurrentReadOutputStream ros[]=new ConcurrentReadOutputStream[ways];
+		final ConcurrentReadOutputStream ros[];
 		if(ffout1!=null && ffout1.length>0){
+			ros=new ConcurrentReadOutputStream[ways];
 			final int buff=1;
 			
 			for(int i=0; i<ways; i++){
 				ros[i]=ConcurrentReadOutputStream.getStream(ffout1[i], ffout2[i], qfout1Array[i], qfout2Array[i], buff, null, useSharedHeader);
 				ros[i].start(); //Start the stream
 			}
-		}
+		}else{ros=null;}
 		
 		//Reset counters
 		readsProcessed=0;
@@ -278,25 +273,8 @@ public class PartitionReads {
 		errorState|=ReadWrite.closeStreams(cris, ros);
 		
 		//Report timing and results
-		{
-			t.stop();
-			
-			//Calculate units per nanosecond
-			double rpnano=readsProcessed/(double)(t.elapsed);
-			double bpnano=basesProcessed/(double)(t.elapsed);
-			
-			//Add "k" and "m" for large numbers
-			String rpstring=(readsProcessed<100000 ? ""+readsProcessed : readsProcessed<100000000 ? (readsProcessed/1000)+"k" : (readsProcessed/1000000)+"m");
-			String bpstring=(basesProcessed<100000 ? ""+basesProcessed : basesProcessed<100000000 ? (basesProcessed/1000)+"k" : (basesProcessed/1000000)+"m");
-			
-			//Format the strings so they have they are right-justified
-			while(rpstring.length()<8){rpstring=" "+rpstring;}
-			while(bpstring.length()<8){bpstring=" "+bpstring;}
-			
-			outstream.println("Time:                         \t"+t);
-			outstream.println("Reads Processed:    "+rpstring+" \t"+String.format("%.2fk reads/sec", rpnano*1000000));
-			outstream.println("Bases Processed:    "+bpstring+" \t"+String.format("%.2fm bases/sec", bpnano*1000));
-		}
+		t.stop();
+		outstream.println(Tools.timeReadsBasesProcessed(t, readsProcessed, basesProcessed, 8));
 		
 		//Throw an exception of there was an error in a thread
 		if(errorState){
@@ -329,7 +307,7 @@ public class PartitionReads {
 			int nextIndex=0;
 			
 			//As long as there is a nonempty read list...
-			while(reads!=null && reads.size()>0){
+			while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
 				if(verbose){outstream.println("Fetched "+reads.size()+" reads.");}
 				
 				//Loop through each read in the list
@@ -341,8 +319,14 @@ public class PartitionReads {
 					final int initialLength2=(r1.mateLength());
 					
 					//Increment counters
-					readsProcessed+=1+r1.mateCount();
+					readsProcessed+=r1.pairCount();
 					basesProcessed+=initialLength1+initialLength2;
+					
+					if(pacBioMode){
+						int zmw=Parse.parseZmw(r1.id);
+						assert(zmw>=0) : "Invalid zmw in "+r1.id;
+						nextIndex=(zmw%ways);
+					}
 					
 					outLists[nextIndex].add(r1);
 					nextIndex=(nextIndex+1)%ways;
@@ -355,7 +339,7 @@ public class PartitionReads {
 				}
 				
 				//Notify the input stream that the list was used
-				cris.returnList(ln.id, ln.list.isEmpty());
+				cris.returnList(ln);
 				if(verbose){outstream.println("Returned a list.");}
 				
 				//Fetch a new list
@@ -376,11 +360,6 @@ public class PartitionReads {
 	/*--------------------------------------------------------------*/
 	/*----------------         Inner Methods        ----------------*/
 	/*--------------------------------------------------------------*/
-	
-	/** This is called if the program runs with no parameters */
-	private void printOptions(){
-		throw new RuntimeException("TODO");
-	}
 	
 	/*--------------------------------------------------------------*/
 	/*----------------            Fields            ----------------*/
@@ -419,6 +398,9 @@ public class PartitionReads {
 	
 	/** Split data into this many output files */
 	private int ways=-1;
+	
+	/** Keep PacBio subreads together in the same file */
+	private boolean pacBioMode=false;
 	
 	/*--------------------------------------------------------------*/
 	/*----------------         Final Fields         ----------------*/

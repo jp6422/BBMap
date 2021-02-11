@@ -2,12 +2,12 @@ package stream;
 
 import java.util.ArrayList;
 
-import align2.Shared;
-import align2.Tools;
-
 import dna.Data;
 import fileIO.ByteFile;
 import fileIO.FileFormat;
+import shared.Shared;
+import shared.Tools;
+import structures.ByteBuilder;
 
 public class FastaQualReadInputStream extends ReadInputStream {
 	
@@ -35,8 +35,8 @@ public class FastaQualReadInputStream extends ReadInputStream {
 			System.err.println("Warning: Did not find expected fasta file extension for filename "+ff.name());
 		}
 		
-		btf=ByteFile.makeByteFile(ff, false);
-		qtf=ByteFile.makeByteFile(FileFormat.testInput(qfname, FileFormat.QUAL, null, ff.allowSubprocess(), false), false);
+		btf=ByteFile.makeByteFile(ff);
+		qtf=ByteFile.makeByteFile(FileFormat.testInput(qfname, FileFormat.QUAL, null, ff.allowSubprocess(), false));
 		interleaved=false;
 		
 	}
@@ -250,12 +250,12 @@ public class FastaQualReadInputStream extends ReadInputStream {
 			return null;
 		}
 		
-		assert(bases.length==quals.length) : 
+		assert(bases.length==quals.length) :
 			"\nFor sequence "+numericID+", name "+new String(header)+":\n" +
 					"The bases and quality scores are different lengths, "+bases.length+" and "+quals.length;
 		
 		for(int i=0; i<bases.length; i++){
-			bases[i]=(byte)Character.toUpperCase(bases[i]);
+			bases[i]=(byte)Tools.toUpperCase(bases[i]);
 		}
 //		for(int i=0; i<quals.length; i++){
 //			quals[i]=(byte)(quals[i]-FASTQ.ASCII_OFFSET);
@@ -263,10 +263,11 @@ public class FastaQualReadInputStream extends ReadInputStream {
 		
 		assert(bases[0]!=carrot) : new String(bases)+"\n"+numericID+"\n"+header[0];
 		String hd=new String(header, 1, header.length-1);
-		Read r=new Read(bases, (byte)0, (byte)0, 0, 0, hd, quals, numericID);
+		Read r=new Read(bases, quals, hd, numericID);
 		return r;
 	}
 	
+	@Override
 	public synchronized boolean close(){
 		if(closed){return errorState;}
 		if(verbose){System.err.println("FastaQualRIS closing.");}
@@ -317,7 +318,7 @@ public class FastaQualReadInputStream extends ReadInputStream {
 	private final ByteFile qtf;
 	private final boolean interleaved;
 
-	private final int BUF_LEN=Shared.READ_BUFFER_LENGTH;
+	private final int BUF_LEN=Shared.bufferLen();;
 
 	public long generated=0;
 	public long consumed=0;

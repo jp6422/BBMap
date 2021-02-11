@@ -2,33 +2,38 @@ package ukmer;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.BitSet;
+import java.util.concurrent.atomic.AtomicLong;
 
-import jgi.BBMerge;
-import kmer.AbstractKmerTableSet;
-import kmer.DumpThread;
-import kmer.Primes;
-import stream.ByteBuilder;
-import stream.ConcurrentReadInputStream;
-import stream.FastaReadInputStream;
-import stream.Read;
-import structures.IntList;
-import structures.ListNum;
-import align2.ReadStats;
-import align2.Shared;
-import align2.Tools;
-import align2.TrimRead;
+import assemble.Contig;
 import bloom.KmerCountAbstract;
 import dna.AminoAcid;
-import dna.Parser;
-import dna.Timer;
 import fileIO.ByteStreamWriter;
 import fileIO.FileFormat;
 import fileIO.ReadWrite;
+import jgi.BBMerge;
+import kmer.AbstractKmerTableSet;
+import kmer.DumpThread;
+import kmer.ScheduleMaker;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.Primes;
+import shared.ReadStats;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
+import shared.TrimRead;
+import stream.ConcurrentReadInputStream;
+import stream.FastaReadInputStream;
+import stream.Read;
+import structures.ByteBuilder;
+import structures.IntList;
+import structures.ListNum;
 
 
 /**
- * Loads and holds kmers for Tadpole/KmerCountExact
+ * Loads and holds kmers for Tadpole2/KmerCountExact
  * @author Brian Bushnell
  * @date Jun 22, 2015
  *
@@ -41,12 +46,6 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 	 */
 	public static void main(String[] args){
 		
-		args=Parser.parseConfig(args);
-		if(Parser.parseHelp(args, true)){
-			printOptions();
-			System.exit(0);
-		}
-		
 		Timer t=new Timer(), t2=new Timer();
 		t.start();
 		t2.start();
@@ -58,6 +57,9 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 		
 		///And run it
 		set.process(t);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(outstream);
 	}
 	
 	/**
@@ -65,7 +67,7 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 	 * @param args Command line arguments
 	 */
 	private KmerTableSetU(String[] args){
-		this(args, 12);//+5 if using ownership and building contigs
+		this(args, 0);//+5 if using ownership and building contigs
 	}
 	
 	
@@ -74,7 +76,12 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 	 * @param args Command line arguments
 	 */
 	public KmerTableSetU(String[] args, int extraBytesPerKmer_){
-		System.err.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
+
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
+		}//TODO - no easy way to close outstream
 		
 		/* Initialize local variables with defaults */
 		Parser parser=new Parser();
@@ -93,12 +100,8 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if("null".equalsIgnoreCase(b)){b=null;}
-			while(a.charAt(0)=='-' && (a.indexOf('.')<0 || i>1 || !new File(a).exists())){a=a.substring(1);}
 			
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(Parser.parseCommonStatic(arg, a, b)){
+			if(Parser.parseCommonStatic(arg, a, b)){
 				//do nothing
 			}else if(Parser.parseZip(arg, a, b)){
 				//do nothing
@@ -126,55 +129,63 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 						in2.add(ss);
 					}
 				}
+			}else if(a.equals("extra")){
+				extra.clear();
+				if(b!=null){
+					String[] s=b.split(",");
+					for(String ss : s){
+						extra.add(ss);
+					}
+				}
 			}else if(a.equals("append") || a.equals("app")){
-				append=ReadStats.append=Tools.parseBoolean(b);
+				append=ReadStats.append=Parse.parseBoolean(b);
 			}else if(a.equals("overwrite") || a.equals("ow")){
-				overwrite=Tools.parseBoolean(b);
+				overwrite=Parse.parseBoolean(b);
 			}else if(a.equals("initialsize")){
-				initialSize=(int)Tools.parseKMG(b);
+				initialSize=Parse.parseIntKMG(b);
 			}else if(a.equals("showstats") || a.equals("stats")){
-				showStats=Tools.parseBoolean(b);
+				showStats=Parse.parseBoolean(b);
 			}else if(a.equals("ways")){
-				ways_=(int)Tools.parseKMG(b);
+				ways_=Parse.parseIntKMG(b);
 			}else if(a.equals("buflen") || a.equals("bufflen") || a.equals("bufferlength")){
-				buflen=(int)Tools.parseKMG(b);
+				buflen=Parse.parseIntKMG(b);
 			}else if(a.equals("k")){
 				assert(b!=null) : "\nk needs an integer value such as k=50.  Default is 62.\n";
-				kbig_=(int)Tools.parseKMG(b);
+				kbig_=Parse.parseIntKMG(b);
 			}else if(a.equals("threads") || a.equals("t")){
 				THREADS=(b==null || b.equalsIgnoreCase("auto") ? Shared.threads() : Integer.parseInt(b));
 			}else if(a.equals("showspeed") || a.equals("ss")){
-				showSpeed=Tools.parseBoolean(b);
+				showSpeed=Parse.parseBoolean(b);
 			}else if(a.equals("ecco")){
-				ecco_=Tools.parseBoolean(b);
+				ecco_=Parse.parseBoolean(b);
 			}else if(a.equals("merge")){
-				merge_=Tools.parseBoolean(b);
+				merge_=Parse.parseBoolean(b);
 			}else if(a.equals("verbose")){
 //				assert(false) : "Verbose flag is currently static final; must be recompiled to change.";
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 			}else if(a.equals("verbose2")){
 //				assert(false) : "Verbose flag is currently static final; must be recompiled to change.";
-				verbose2=Tools.parseBoolean(b);
+				verbose2=Parse.parseBoolean(b);
 			}else if(a.equals("minprob")){
 				minProb_=Double.parseDouble(b);
 			}else if(a.equals("minprobprefilter") || a.equals("mpp")){
-				minProbPrefilter=Tools.parseBoolean(b);
+				minProbPrefilter=Parse.parseBoolean(b);
 			}else if(a.equals("minprobmain") || a.equals("mpm")){
-				minProbMain=Tools.parseBoolean(b);
+				minProbMain=Parse.parseBoolean(b);
 			}else if(a.equals("reads") || a.startsWith("maxreads")){
-				maxReads=Tools.parseKMG(b);
+				maxReads=Parse.parseKMG(b);
 			}else if(a.equals("prealloc") || a.equals("preallocate")){
 				if(b==null || b.length()<1 || Character.isLetter(b.charAt(0))){
-					prealloc_=Tools.parseBoolean(b);
+					prealloc_=Parse.parseBoolean(b);
 				}else{
 					preallocFraction=Tools.max(0, Double.parseDouble(b));
 					prealloc_=(preallocFraction>0);
 				}
 			}else if(a.equals("prefilter")){
-				if(b==null || b.length()<1 || !Character.isDigit(b.charAt(0))){
-					prefilter=Tools.parseBoolean(b);
+				if(b==null || b.length()<1 || !Tools.isDigit(b.charAt(0))){
+					prefilter=Parse.parseBoolean(b);
 				}else{
-					filterMax_=(int)Tools.parseKMG(b);
+					filterMax_=Parse.parseIntKMG(b);
 					prefilter=filterMax_>0;
 				}
 			}else if(a.equals("prefiltersize") || a.equals("prefilterfraction") || a.equals("pff")){
@@ -182,21 +193,29 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 				assert(prefilterFraction<=1) : "prefiltersize must be 0-1, a fraction of total memory.";
 				prefilter=prefilterFraction>0;
 			}else if(a.equals("prehashes") || a.equals("hashes")){
-				prehashes=(int)Tools.parseKMG(b);
+				prehashes=Parse.parseIntKMG(b);
 			}else if(a.equals("prefilterpasses") || a.equals("prepasses")){
+				assert(b!=null) : "Bad parameter: "+arg;
 				if(b.equalsIgnoreCase("auto")){
 					prepasses=-1;
 				}else{
-					prepasses=(int)Tools.parseKMG(b);
+					prepasses=Parse.parseIntKMG(b);
 				}
 			}else if(a.equals("onepass")){
-				onePass=Tools.parseBoolean(b);
+				onePass=Parse.parseBoolean(b);
 			}else if(a.equals("passes")){
-				int passes=(int)Tools.parseKMG(b);
+				int passes=Parse.parseIntKMG(b);
 				onePass=(passes<2);
 			}else if(a.equals("rcomp")){
-				rcomp_=Tools.parseBoolean(b);
-			}else if(IGNORE_UNKNOWN_ARGS){
+				rcomp_=Parse.parseBoolean(b);
+			}
+			
+			else if(a.equalsIgnoreCase("filterMemoryOverride") || a.equalsIgnoreCase("filterMemory") || 
+					a.equalsIgnoreCase("prefilterMemory") || a.equalsIgnoreCase("filtermem")){
+				filterMemoryOverride=Parse.parseKMG(b);
+			}
+			
+			else if(IGNORE_UNKNOWN_ARGS){
 				//Do nothing
 			}else{
 				throw new RuntimeException("Unknown parameter "+args[i]);
@@ -209,6 +228,7 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 			qtrimLeft=parser.qtrimLeft;
 			qtrimRight=parser.qtrimRight;
 			trimq=parser.trimq;
+			trimE=parser.trimE();
 			
 			minAvgQuality=parser.minAvgQuality;
 			minAvgQualityBases=parser.minAvgQualityBases;
@@ -226,6 +246,8 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 			usableMemory=(long)Tools.max(((memory-96000000)*(xmsRatio>0.97 ? 0.82 : 0.72)), memory*0.45);
 			if(prepasses==0 || !prefilter){
 				filterMemory0=filterMemory1=0;
+			}else if(filterMemoryOverride>0){
+				filterMemory0=filterMemory1=filterMemoryOverride;
 			}else{
 				double low=Tools.min(prefilterFraction, 1-prefilterFraction);
 				double high=1-low;
@@ -248,7 +270,7 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 
 		prealloc=prealloc_;
 		bytesPerKmer=4+8*mult+extraBytesPerKmer_;
-		assert(bytesPerKmer>=4+8*mult) : bytesPerKmer+", "+mult+", "+k+", "+kbig+", "+(4+8*mult);
+		assert(bytesPerKmer>=4+8*mult) : bytesPerKmer+", "+mult+", "+k+", "+kbig+", "+(4+8*mult)+", "+extraBytesPerKmer_;
 		if(ways_<1){
 			long maxKmers=(2*tableMemory)/bytesPerKmer;
 			long minWays=Tools.min(10000, maxKmers/Integer.MAX_VALUE);
@@ -268,7 +290,9 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 		merge=merge_;
 		minProb=(float)minProb_;
 		rcomp=rcomp_;
-		estimatedKmerCapacity=(long)((tableMemory*1.0/bytesPerKmer)*((prealloc && preallocFraction==1) ? 0.9 : 0.6));
+		Kmer.rcomp=rcomp;
+//		System.err.println("rcomp="+rcomp);
+		estimatedKmerCapacity=(long)((tableMemory*1.0/bytesPerKmer)*((prealloc ? preallocFraction : 0.81))*(HashArrayU.maxLoadFactorFinal*0.97));
 		KmerCountAbstract.minProb=(minProbPrefilter ? minProb : 0);
 		
 		if(kbig!=kbig_){
@@ -290,10 +314,7 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 		
 		assert(FastaReadInputStream.settingsOK());
 		
-		if(in1.isEmpty()){
-			printOptions();
-			throw new RuntimeException("Error - at least one input file is required.");
-		}
+		if(in1.isEmpty()){throw new RuntimeException("Error - at least one input file is required.");}
 		
 		for(int i=0; i<in1.size(); i++){
 			String s=in1.get(i);
@@ -306,10 +327,26 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 			}
 		}
 		
+		if(!extra.isEmpty()){
+			ArrayList<String> temp=(ArrayList<String>) extra.clone();
+			extra.clear();
+			for(String s : temp){
+				if(s!=null && s.contains("#") && !new File(s).exists()){
+					int pound=s.lastIndexOf('#');
+					String a=s.substring(0, pound);
+					String b=s.substring(pound+1);
+					extra.add(a);
+					extra.add(b);
+				}else{
+					extra.add(s);
+				}
+			}
+		}
+		
 		{
 			boolean allowDuplicates=true;
-			if(!Tools.testInputFiles(allowDuplicates, true, in1, in2)){
-				throw new RuntimeException("\nCan't read to some input files.\n");
+			if(!Tools.testInputFiles(allowDuplicates, true, in1, in2, extra)){
+				throw new RuntimeException("\nCan't read some input files.\n");  
 			}
 		}
 		assert(THREADS>0);
@@ -340,12 +377,17 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 		assert(tables==null);
 		tables=null;
 		final int tableType=AbstractKmerTableU.ARRAY1D;
-		tables=AbstractKmerTableU.preallocate(ways, tableType, initialSize, kbig, (!prealloc || preallocFraction<1));
+		
+		ScheduleMaker scheduleMaker=new ScheduleMaker(ways, bytesPerKmer, prealloc, 
+				(prealloc ? preallocFraction : 1.0), -1, (prefilter ? prepasses : 0), prefilterFraction, filterMemoryOverride);
+		int[] schedule=scheduleMaker.makeSchedule();
+		tables=AbstractKmerTableU.preallocate(ways, tableType, schedule, k, kbig);
 	}
 	
 	/**
 	 * Load reads into tables, using multiple LoadThread.
 	 */
+	@Override
 	public long loadKmers(String fname1, String fname2){
 		
 		/* Create read input stream */
@@ -382,6 +424,7 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 			lowqBases+=pt.lowqBasesT;
 			readsTrimmed+=pt.readsTrimmedT;
 			basesTrimmed+=pt.basesTrimmedT;
+			kmersIn+=pt.kmersInT;
 		}
 		
 		/* Shut down I/O streams; capture error status */
@@ -394,7 +437,7 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 	/*--------------------------------------------------------------*/
 
 	/**
-	 * Loads kmers. 
+	 * Loads kmers.
 	 */
 	private class LoadThread extends Thread{
 		
@@ -414,7 +457,7 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 			ArrayList<Read> reads=(ln!=null ? ln.list : null);
 			
 			//While there are more reads lists...
-			while(reads!=null && reads.size()>0){
+			while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
 				
 				//For each read (or pair) in the list...
 				for(int i=0; i<reads.size(); i++){
@@ -441,7 +484,7 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 					
 					if(r1!=null){
 						if(qtrimLeft || qtrimRight){
-							int x=TrimRead.trimFast(r1, qtrimLeft, qtrimRight, trimq, 1);
+							int x=TrimRead.trimFast(r1, qtrimLeft, qtrimRight, trimq, trimE, 1);
 							basesTrimmedT+=x;
 							readsTrimmedT+=(x>0 ? 1 : 0);
 						}
@@ -449,7 +492,7 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 					}
 					if(r2!=null){
 						if(qtrimLeft || qtrimRight){
-							int x=TrimRead.trimFast(r2, qtrimLeft, qtrimRight, trimq, 1);
+							int x=TrimRead.trimFast(r2, qtrimLeft, qtrimRight, trimq, trimE, 1);
 							basesTrimmedT+=x;
 							readsTrimmedT+=(x>0 ? 1 : 0);
 						}
@@ -492,11 +535,11 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 				}
 				
 				//Fetch a new read list
-				cris.returnList(ln.id, ln.list.isEmpty());
+				cris.returnList(ln);
 				ln=cris.nextList();
 				reads=(ln!=null ? ln.list : null);
 			}
-			cris.returnList(ln.id, ln.list.isEmpty());
+			cris.returnList(ln);
 			long temp=table.flush();
 			if(verbose){System.err.println("Flush: Added "+temp);}
 			added+=temp;
@@ -544,6 +587,7 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 				
 //				if(verbose){System.err.println("A: Scanning i="+i+", len="+len+", kmer="+kmer.toString()+"\t"+new String(bases, Tools.max(0, i-kbig2), Tools.min(i+1, kbig)));}
 				if(len>=kbig && prob>=minProb2){
+					kmersInT++;
 //					System.err.println("kmer="+kmer+"; xor()="+kmer.xor()+"; filterMax2="+filterMax2+"; prefilter="+prefilter);
 //					System.err.println("prefilterArray.read(xor.key())="+prefilterArray.read(kmer.xor())+"");
 //					System.err.println("prefilterArray.read(kmer.key())="+prefilterArray.read(kmer.key())+"");
@@ -625,6 +669,7 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 		private long lowqBasesT=0;
 		private long readsTrimmedT=0;
 		private long basesTrimmedT=0;
+		private long kmersInT=0;
 		private final Kmer kmer;
 		
 	}
@@ -634,47 +679,112 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 	/*----------------          Convenience         ----------------*/
 	/*--------------------------------------------------------------*/
 	
-	public void regenerateCounts(byte[] bases, IntList counts, final int a, final Kmer kmer){
-		final int loc=a+kbig;
-		final int lim=Tools.min(counts.size, a+kbig+1);
+	public int regenerateCounts(byte[] bases, IntList counts, final int ca, final Kmer kmer){
+		final int b=ca+kbig; //first base changed
+		final int lim=Tools.min(counts.size, ca+kbig+1); //count limit
+//		System.err.println("ca="+ca+", b="+b+", lim="+lim);
+//		System.err.println("Regen from count "+(ca+1)+"-"+lim);
 		int len=0;
+		int valid=0;
 		kmer.clear();
+//		System.err.println("ca="+ca+", b="+b+", lim="+lim+", "+counts);
 		
 		//Generate initial kmer
-		for(int i=a; i<loc; i++){
-			final byte b=bases[i];
-			final long x=AminoAcid.baseToNumber[b];
+		for(int i=b-kbig; i<b; i++){
+			final byte base=bases[i];
+			final long x=AminoAcid.baseToNumber[base];
 			
-			kmer.addRight(b);
+			kmer.addRight(base);
 			
 			if(x<0){
 				len=0;
 			}else{len++;}
 			assert(len==kmer.len);
 		}
-		assert(len==kbig || Tools.indexOf(bases, (byte)'N')>=a) : new String(bases)+"\n"+a+", "+len;
+		assert(len==kbig || Tools.indexOf(bases, (byte)'N')>=ca) : new String(bases)+"\n"+ca+", "+len;
 		
-		/* Loop through the bases, maintaining a forward and reverse kmer via bitshifts */
-		for(int i=loc, j=a+1; j<lim; i++, j++){
-			final byte b=bases[i];
-			final long x=AminoAcid.baseToNumber[b];
+		/* Loop through the bases, maintaining a forward and reverse kmer via bitshifts.
+		 * i is an index in the base array, j is an index in the count array. */
+		for(int i=b, j=ca+1; j<lim; i++, j++){
+			final byte base=bases[i];
+			final long x=AminoAcid.baseToNumber[base];
 			
-			kmer.addRight(b);
+			kmer.addRight(base);
 			
 			if(x<0){len=0;}
 			else{len++;}
 			assert(len==kmer.len);
 			
 			if(len>=kbig){
+				valid++;
 				int count=getCount(kmer);
 				counts.set(j, count);
 			}else{
 				counts.set(j, 0);
 			}
 		}
+//		System.err.println("ca="+ca+", b="+b+", lim="+lim+", "+counts);
+		return valid;
 	}
 	
-	public int fillCounts(byte[] bases, IntList counts, final Kmer kmer){
+	@Override
+	public int regenerateCounts(byte[] bases, IntList counts, final Kmer kmer, BitSet changed){
+		assert(!changed.isEmpty());
+		final int firstBase=changed.nextSetBit(0), lastBase=changed.length()-1;
+		final int ca=firstBase-kbig;
+//		final int b=changed.nextSetBit(0);ca+kbig; //first base changed
+		final int firstCount=Tools.max(firstBase-kbig+1, 0), lastCount=Tools.min(counts.size-1, lastBase); //count limit
+//		System.err.println("ca="+ca+", b="+b+", lim="+lim);
+//		System.err.println("Regen from count "+(ca+1)+"-"+lim);
+		int len=0;
+		int valid=0;
+		kmer.clear();
+//		System.err.println("ca="+ca+", b="+b+", lim="+lim+", "+counts);
+		
+		//Generate initial kmer
+		for(int i=Tools.max(0, firstBase-kbig+1); i<firstBase; i++){
+			final byte base=bases[i];
+			final long x=AminoAcid.baseToNumber[base];
+			
+			kmer.addRight(base);
+			
+			if(x<0){
+				len=0;
+			}else{len++;}
+			assert(len==kmer.len);
+		}
+		assert(len==kbig-1 || Tools.indexOf(bases, (byte)'N')>=0 || firstBase<kbig) :
+			new String(bases)+"\n"+ca+", "+len+", "+firstBase;
+		
+		/* Loop through the bases, maintaining a forward and reverse kmer via bitshifts.
+		 * i is an index in the base array, j is an index in the count array. */
+		for(int i=firstBase, lim=Tools.min(lastBase+k-1, bases.length-1); i<=lim; i++){
+			final byte base=bases[i];
+			final long x=AminoAcid.baseToNumber[base];
+			
+			kmer.addRight(base);
+			
+			if(x<0){len=0;}
+			else{len++;}
+			assert(len==kmer.len);
+			
+			final int c=i-kbig+1;
+			if(i>=firstBase){
+				if(len>=kbig){
+					valid++;
+					int count=getCount(kmer);
+					counts.set(c, count);
+				}else if(c>=0){
+					counts.set(c, 0);
+				}
+			}
+		}
+//		System.err.println("ca="+ca+", b="+b+", lim="+lim+", "+counts);
+		return valid;
+	}
+	
+	@Override
+	public int fillSpecificCounts(byte[] bases, IntList counts, BitSet positions, final Kmer kmer){
 		counts.clear();
 		
 		{
@@ -694,20 +804,20 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 		assert(len<=kbig) : len+", "+kbig;
 		
 		/* Loop through the bases, maintaining a forward and reverse kmer via bitshifts */
-		for(int i=kbig; i<bases.length; i++){
-			final byte b=bases[i];
-			final long x=AminoAcid.baseToNumber[b];
+		for(int i=kbig, j=0; i<bases.length; i++, j++){
+			final byte base=bases[i];
+			final long x=AminoAcid.baseToNumber[base];
 			
-			kmer.addRight(b);
+			kmer.addRight(base);
 			
 			if(x<0){len=0;}
 			else{len++;}
 			assert(len==kmer.len);
 			
-			if(len>=kbig){
+			if(len>=kbig && (positions==null || positions.get(j))){
 				valid++;
 				int count=getCount(kmer);
-				counts.add(count);
+				counts.add(Tools.max(count, 0));
 			}else{
 				counts.add(0);
 			}
@@ -720,10 +830,11 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 	/*----------------        Helper Methods        ----------------*/
 	/*--------------------------------------------------------------*/
 	
-	public long regenerate(){
+	@Override
+	public long regenerate(final int limit){
 		long sum=0;
 		for(AbstractKmerTableU akt : tables){
-			sum+=akt.regenerate();
+			sum+=akt.regenerate(limit);
 		}
 		return sum;
 	}
@@ -732,29 +843,31 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 		return (HashArrayU1D) tables[kmer.mod(ways)];
 	}
 	
+	@Override
 	public HashArrayU1D getTable(int tnum){
 		return (HashArrayU1D) tables[tnum];
 	}
 	
 	@Override
 	public long[] fillHistogram(int histMax) {
-		long[] ca=new long[histMax+1];
+		return HistogramMakerU.fillHistogram(tables, histMax);
+	}
+	
+	@Override
+	public void countGC(long[] gcCounts, int max) {
 		for(AbstractKmerTableU set : tables){
-			set.fillHistogram(ca, histMax);
+			set.countGC(gcCounts, max);
 		}
-		return ca;
 	}
 	
+	@Override
 	public void initializeOwnership(){
-		for(AbstractKmerTableU akt : tables){
-			akt.initializeOwnership();
-		}
+		OwnershipThread.initialize(tables);
 	}
 	
+	@Override
 	public void clearOwnership(){
-		for(AbstractKmerTableU akt : tables){
-			akt.clearOwnership();
-		}
+		OwnershipThread.clear(tables);
 	}
 	
 	public Kmer rightmostKmer(final ByteBuilder bb, Kmer kmer){
@@ -857,6 +970,39 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 			}
 		}
 		return sum==0 ? 0 : sum/(float)kmers;
+	}
+	
+	public float calcCoverage(final Contig contig, final Kmer kmer){
+		final byte[] bases=contig.bases;
+		if(bases.length<kbig){return 0;}
+		int len=0;
+		kmer.clear();
+		long sum=0;
+		int max=0, min=Integer.MAX_VALUE;
+		int kmers=0;
+		
+		/* Loop through the bases, maintaining a forward and reverse kmer via bitshifts, to get the rightmost kmer */
+		for(int i=0; i<bases.length; i++){
+			final byte b=bases[i];
+			final long x=AminoAcid.baseToNumber[b];
+			kmer.addRight(b);
+
+			if(x<0){len=0;}
+			else{len++;}
+			assert(len==kmer.len);
+
+			if(len>=kbig){
+				int count=getCount(kmer);
+				sum+=count;
+				max=Tools.max(count, max);
+				min=Tools.min(count, min);
+				kmers++;
+			}
+		}
+		contig.coverage=sum==0 ? 0 : sum/(float)kmers;
+		contig.maxCov=max;
+		contig.minCov=sum==0 ? 0 : min;
+		return contig.coverage;
 	}
 	
 	public boolean claim(final byte[] bases, final int blen, final int id, boolean exitEarly, final Kmer kmer){
@@ -971,8 +1117,69 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 		int way=kmer.mod(ways);
 		return tables[way].getValue(kmer);
 	}
+
+	public int getOwner(Kmer kmer){
+		int way=kmer.mod(ways);
+		return tables[way].getOwner(kmer);
+	}
+	
+	/*--------------------------------------------------------------*/
+	/*----------------          Fill Counts         ----------------*/
+	/*--------------------------------------------------------------*/
 	
 	public int fillRightCounts(Kmer kmer, int[] counts){
+		if(FAST_FILL && MASK_CORE && k>2){
+			return fillRightCounts_fast(kmer, counts);
+		}else{
+			return fillRightCounts_safe(kmer, counts);
+		}
+	}
+	
+	public int fillLeftCounts(Kmer kmer, int[] counts){
+		if(FAST_FILL && MASK_CORE && k>2){
+			return fillLeftCounts_fast(kmer, counts);
+		}else{
+			return fillLeftCounts_safe(kmer, counts);
+		}
+	}
+	
+	public int fillRightCounts_fast(Kmer kmer, int[] counts){
+		assert(MASK_CORE);
+		final long old=kmer.addRightNumeric(0);
+		if(kmer.corePalindrome()){
+			kmer.addLeftNumeric(old);
+			return fillRightCounts_safe(kmer, counts);
+		}
+		final int way=kmerToWay(kmer);
+		final HashArrayU table=(HashArrayU) tables[way];
+		final int cell=table.kmerToCell(kmer);
+		int max=-1, maxPos=0;
+		
+		{//Iteration 0
+			final int count=Tools.max(0, table.getValue(kmer, cell));
+			assert(count==NOT_PRESENT || count>=0);
+			counts[0]=count;
+			max=count;
+			maxPos=0;
+			kmer.addLeftNumeric(old);
+		}
+
+		for(int i=1; i<=3; i++){
+			kmer.addRightNumeric(i);
+			if(verbose){outstream.println("kmer:               "+kmer);}
+			final int count=Tools.max(0, table.getValue(kmer, cell));
+			assert(count==NOT_PRESENT || count>=0);
+			counts[i]=count;
+			if(count>max){
+				max=count;
+				maxPos=i;
+			}
+			kmer.addLeftNumeric(old);
+		}
+		return maxPos;
+	}
+	
+	public int fillRightCounts_safe(Kmer kmer, int[] counts){
 		assert(kmer.len>=kbig);
 		if(verbose){outstream.println("fillRightCounts:   "+kmer);}
 		int max=-1, maxPos=0;
@@ -992,12 +1199,76 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 				maxPos=i;
 			}
 			kmer.addLeftNumeric(old);
-//			assert(kmer.equals(kmer2));
 		}
 		return maxPos;
 	}
 	
-	public int fillLeftCounts(final Kmer kmer, int[] counts){
+//	public int fillLeftCounts_fast(Kmer kmer, int[] counts){
+//		assert(MASK_CORE);
+//		final long old=kmer.addLeftNumeric(0);
+//		if(kmer.corePalindrome()){
+//			kmer.addRightNumeric(old);
+//			return fillLeftCounts_safe(kmer, counts);
+//		}
+//		final int way=kmerToWay(kmer);
+//		final HashArrayU table=(HashArrayU) tables[way];
+//		final int cell=table.kmerToCell(kmer);
+//		int max=-1, maxPos=0;
+//		
+//		for(int i=0; i<=3; i++){
+//			kmer.addLeftNumeric(i);
+//			if(verbose){outstream.println("kmer:               "+kmer);}
+//			final int count=Tools.max(0, table.getValue(kmer, cell));
+//			assert(count==NOT_PRESENT || count>=0);
+//			counts[i]=count;
+//			if(count>max){
+//				max=count;
+//				maxPos=i;
+//			}
+//			kmer.addRightNumeric(old);
+//		}
+//		return maxPos;
+//	}
+	
+	public int fillLeftCounts_fast(Kmer kmer, int[] counts){
+		assert(MASK_CORE);
+		final long old=kmer.addLeftNumeric(0);
+		if(kmer.corePalindrome()){
+			kmer.addRightNumeric(old);
+			return fillLeftCounts_safe(kmer, counts);
+		}
+		final int way=kmerToWay(kmer);
+		final HashArrayU table=(HashArrayU) tables[way];
+		final int cell=table.kmerToCell(kmer);
+		int max=-1, maxPos=0;
+		
+		{//Iteration 0
+			if(verbose){outstream.println("kmer:               "+kmer);}
+			final int count=Tools.max(0, table.getValue(kmer, cell));
+			assert(count==NOT_PRESENT || count>=0);
+			counts[0]=count;
+			max=count;
+			maxPos=0;
+			kmer.addRightNumeric(old);
+		}
+		
+		for(int i=1; i<=3; i++){
+			kmer.addLeftNumeric(i);
+			if(verbose){outstream.println("kmer:               "+kmer);}
+			final int count=Tools.max(0, table.getValue(kmer, cell));
+			assert(count==NOT_PRESENT || count>=0);
+			counts[i]=count;
+			if(count>max){
+				max=count;
+				maxPos=i;
+			}
+			kmer.addRightNumeric(old);
+		}
+		return maxPos;
+	}
+	
+	
+	public int fillLeftCounts_safe(final Kmer kmer, int[] counts){
 		assert(kmer.len>=kbig);
 		if(verbose){outstream.println("fillLeftCounts:    "+kmer);}
 		int max=-1, maxPos=0;
@@ -1035,14 +1306,15 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 	/*----------------       Printing Methods       ----------------*/
 	/*--------------------------------------------------------------*/
 	
-	public boolean dumpKmersAsBytes(String fname, int minToDump, boolean printTime){
+	@Override
+	public boolean dumpKmersAsBytes(String fname, int mincount, int maxcount, boolean printTime, AtomicLong remaining){
 		if(fname==null){return false;}
 		Timer t=new Timer();
 		
-		ByteStreamWriter bsw=new ByteStreamWriter(fname, overwrite, false, true);
+		ByteStreamWriter bsw=new ByteStreamWriter(fname, overwrite, append, true);
 		bsw.start();
 		for(AbstractKmerTableU set : tables){
-			set.dumpKmersAsBytes(bsw, k, minToDump);
+			set.dumpKmersAsBytes(bsw, k, mincount, maxcount, remaining);
 		}
 		bsw.poisonAndWait();
 		
@@ -1051,17 +1323,18 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 		return bsw.errorState;
 	}
 	
-	public boolean dumpKmersAsBytes_MT(String fname, int minToDump, boolean printTime){
+	@Override
+	public boolean dumpKmersAsBytes_MT(String fname, int mincount, int maxcount, boolean printTime, AtomicLong remaining){
 		
 		final int threads=Tools.min(Shared.threads(), tables.length);
-		if(threads<3 || DumpThread.NUM_THREADS==1){return dumpKmersAsBytes(fname, minToDump, printTime);}
+		if(threads<3 || DumpThread.NUM_THREADS==1){return dumpKmersAsBytes(fname, mincount, maxcount, printTime, remaining);}
 		
 		if(fname==null){return false;}
 		Timer t=new Timer();
 		
-		ByteStreamWriter bsw=new ByteStreamWriter(fname, overwrite, false, true);
+		ByteStreamWriter bsw=new ByteStreamWriter(fname, overwrite, append, true);
 		bsw.start();
-		DumpThreadU.dump(k, minToDump, tables, bsw);
+		DumpThreadU.dump(k, mincount, maxcount, tables, bsw, remaining);
 		bsw.poisonAndWait();
 		
 		t.stop();
@@ -1090,17 +1363,26 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 	@Override
 	public boolean qtrimRight(){return qtrimRight;}
 	@Override
-	public byte minAvgQuality(){return minAvgQuality;}
+	public float minAvgQuality(){return minAvgQuality;}
 	@Override
 	public long tableMemory(){return tableMemory;}
 	@Override
 	public long estimatedKmerCapacity(){return estimatedKmerCapacity;}
 	@Override
 	public int ways(){return ways;}
+	@Override
+	public boolean rcomp(){return rcomp;}
 	
+	public final int kmerToWay(final Kmer kmer){
+		final int way=(int)(kmer.xor()%ways);
+		return way;
+	}
 	
 	/** Hold kmers.  A kmer X such that X%WAYS=Y will be stored in tables[Y] */
 	private AbstractKmerTableU[] tables;
+	public AbstractKmerTableU[] tables(){return tables;}
+	
+	public long filterMemoryOverride=0;
 	
 	private final int bytesPerKmer;
 
@@ -1110,10 +1392,10 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 	private final long tableMemory;
 	private final long estimatedKmerCapacity;
 	
-	/** Number of tables (and threads, during loading) */ 
+	/** Number of tables (and threads, during loading) */
 	private final boolean prealloc;
 	
-	/** Number of tables (and threads, during loading) */ 
+	/** Number of tables (and threads, during loading) */
 	public final int ways;
 	
 	/** Total kmer length */
@@ -1133,10 +1415,12 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 	/** Quality-trim the right side */
 	public final boolean qtrimRight;
 	/** Trim bases at this quality or below.  Default: 4 */
-	public final byte trimq;
+	public final float trimq;
+	/** Error rate for trimming (derived from trimq) */
+	private final float trimE;
 	
-	/** Throw away reads below this average quality before trimming.  Default: 0 */
-	public final byte minAvgQuality;
+	/** Throw away reads below this average quality after trimming.  Default: 0 */
+	public final float minAvgQuality;
 	/** If positive, calculate average quality from the first X bases only.  Default: 0 */
 	public final int minAvgQualityBases;
 	
@@ -1148,5 +1432,40 @@ public class KmerTableSetU extends AbstractKmerTableSet {
 	
 	/** Attempt to merge via overlap prior to counting kmers */
 	private final boolean merge;
+	
+	/*--------------------------------------------------------------*/
+	/*----------------            Walker            ----------------*/
+	/*--------------------------------------------------------------*/
+	
+	public WalkerU walk(){
+		return new WalkerKSTU();
+	}
+	
+	public class WalkerKSTU extends WalkerU {
+		
+		WalkerKSTU(){
+			w=tables[0].walk();
+		}
+		
+		/** 
+		 * Fills this object with the next key and value.
+		 * @return True if successful.
+		 */
+		public boolean next(){
+			if(w==null){return false;}
+			if(w.next()){return true;}
+			if(tnum<tables.length){tnum++;}
+			w=(tnum<tables.length ? tables[tnum].walk() : null);
+			return w==null ? false : w.next();
+		}
+		
+		public Kmer kmer(){return w.kmer();}
+		public int value(){return w.value();}
+		
+		private WalkerU w=null;
+
+		/** current table number */
+		private int tnum=0;
+	}
 	
 }

@@ -39,7 +39,7 @@ Stricter settings have lower merge rates and fewer false positives; looser setti
 
 Trimming:
 
-Adapter-trimming reads is fine and is recommended prior to running BBDuk, particularly if kmers will be used.  Quality-trimming is usually not recommended, unless the library has major quality issues at the right end of reads resulting in a low merge rate, in which case only weak trimming (such as qtrim=r trimq=8) should be used.
+Adapter-trimming reads is fine and is recommended prior to running BBMerge, particularly if kmers will be used.  Quality-trimming is usually not recommended, unless the library has major quality issues at the right end of reads resulting in a low merge rate, in which case only weak trimming (such as qtrim=r trimq=8) should be used.
 
 
 When not to use:

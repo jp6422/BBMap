@@ -6,11 +6,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Arrays;
 
-import dna.Gene;
-import dna.Timer;
 import fileIO.ReadWrite;
 import fileIO.TextFile;
 import fileIO.TextStreamWriter;
+import shared.Timer;
 
 public class ConcatenateFiles {
 	
@@ -43,7 +42,7 @@ public class ConcatenateFiles {
 		
 		for(int chrom=1; chrom<26; chrom++){
 			String fname=basename.replace("#", ""+chrom);
-			TextFile tf=new TextFile(fname, false, true);
+			TextFile tf=new TextFile(fname, false);
 			
 			tsw.print(">chr"+chrom+"\n");
 			for(String s=tf.nextLine(); s!=null; s=tf.nextLine()){

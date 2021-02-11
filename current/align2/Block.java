@@ -2,10 +2,10 @@ package align2;
 
 import java.io.File;
 import java.io.Serializable;
-import java.util.Arrays;
 
 import fileIO.LoadThread;
 import fileIO.ReadWrite;
+import shared.KillSwitch;
 
 /**
  * @author Brian Bushnell
@@ -40,7 +40,7 @@ public class Block implements Serializable{
 		int len=length(key);
 		if(len==0){return null;}
 		int start=starts[key];
-		int[] r=Arrays.copyOfRange(sites, start, start+len);
+		int[] r=KillSwitch.copyOfRange(sites, start, start+len);
 		return r;
 	}
 	
@@ -49,7 +49,7 @@ public class Block implements Serializable{
 		int len=length(start, stop);
 		if(len==0){return null;}
 		assert(len>0) : len+", "+start+", "+stop;
-		int[] r=Arrays.copyOfRange(sites, start, start+len);
+		int[] r=KillSwitch.copyOfRange(sites, start, start+len);
 		return r;
 	}
 	

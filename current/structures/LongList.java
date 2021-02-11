@@ -2,17 +2,39 @@ package structures;
 
 import java.util.Arrays;
 
-import align2.Tools;
+import shared.KillSwitch;
+import shared.Shared;
+import shared.Tools;
 
 
 
 public final class LongList{
 	
+	public static void main(String[] args){
+		LongList list=new LongList();
+		list.add(3);
+		list.add(1);
+		list.add(2);
+		list.add(5);
+		list.add(2);
+		list.add(1);
+		list.add(7);
+		list.add(3);
+		list.add(3);
+		System.err.println(list);
+		list.sort();
+		System.err.println(list);
+		list.condense();
+		System.err.println(list);
+		list.condense();
+		System.err.println(list);
+	}
+	
 	public LongList(){this(256);}
 	
 	public LongList(int initial){
 		assert(initial>0);
-		array=new long[initial];
+		array=KillSwitch.allocLong1D(initial);
 	}
 	
 	public void clear(){
@@ -27,6 +49,11 @@ public final class LongList{
 		size=max(size, loc+1);
 	}
 	
+	public final void setLast(long value){
+		assert(size>0);
+		array[size-1]=value;
+	}
+	
 	public final void increment(int loc, long value){
 		if(loc>=array.length){
 			resize(loc*2L+1);
@@ -39,13 +66,13 @@ public final class LongList{
 		increment(loc, 1);
 	}
 	
-	public final void add(LongList b){
+	public final void incrementBy(LongList b){
 		for(int i=b.size-1; i>=0; i--){
 			increment(i, b.get(i));
 		}
 	}
 	
-	public final void add(long[] b){
+	public final void incrementBy(long[] b){
 		for(int i=b.length-1; i>=0; i--){
 			increment(i, b[i]);
 		}
@@ -77,14 +104,14 @@ public final class LongList{
 	
 	private final void resize(final long size2){
 		assert(size2>size) : size+", "+size2;
-		final int size3=(int)Tools.min(Integer.MAX_VALUE, size2);
+		final int size3=(int)Tools.min(Shared.MAX_ARRAY_LEN, size2);
 		assert(size3>size) : "Overflow: "+size+", "+size2+" -> "+size3;
-		array=Arrays.copyOf(array, size3);
+		array=KillSwitch.copyOf(array, size3);
 	}
 	
 	public final void shrink(){
 		if(size==array.length){return;}
-		array=Arrays.copyOf(array, size);
+		array=KillSwitch.copyOf(array, size);
 	}
 	
 	public final double stdev(){
@@ -98,6 +125,23 @@ public final class LongList{
 			sumdev2+=(dev*dev);
 		}
 		return Math.sqrt(sumdev2/size);
+	}
+	
+	public final double avgDif(final double x){
+		double sum=0;
+		for(int i=0; i<size; i++){
+			sum+=Tools.absdif(x, array[i]);
+		}
+		return sum/(Tools.max(1, size));
+	}
+	
+	public final double rmsDif(final double x){
+		double sum=0;
+		for(int i=0; i<size; i++){
+			double dif=Tools.absdif(x, array[i]);
+			sum+=dif*dif;
+		}
+		return Math.sqrt(sum/(Tools.max(1, size)));
 	}
 	
 	public final long sumLong(){
@@ -120,11 +164,80 @@ public final class LongList{
 		return size<1 ? 0 : sum()/size;
 	}
 	
+	//Ignores elements below 1
+	public final double harmonicMean(){
+		double sum=0;
+		int count=0;
+		for(int i=0; i<size; i++){
+			if(array[i]>0){
+				sum+=1.0/array[i];
+				count++;
+			}
+		}
+		double avg=sum/Tools.max(1, count);
+		return 1.0/avg;
+	}
+	
+	//Ignores elements below 1
+	public final double geometricMean(){
+		double sum=0;
+		int count=0;
+		for(int i=0; i<size; i++){
+			if(array[i]>0){
+				sum+=Math.log(array[i]);
+				count++;
+			}
+		}
+		double avg=sum/Tools.max(1, count);
+		return Math.exp(avg);
+	}
+	
+	/** Assumes list is sorted */
+	public final double medianWeightedAverage(){
+		if(size<1){return 0;}
+		int half=size/2;
+		long count=0;
+		double sum=0;
+		for(int i=0, j=size-1; i<half; i++, j--){
+			int mult=i+1;
+			double incr=(array[i]+array[j])*mult;
+			sum+=incr;
+			count+=2*mult;
+		}
+		if((size&1)==1){//odd length
+			int mult=half+1;
+			double incr=(array[half])*mult;
+			sum+=incr;
+			count+=2*mult;
+		}
+		return sum/count;
+	}
+	
 	/** Assumes list is sorted */
 	public final long median(){
 		if(size<1){return 0;}
-		int idx=percentile(0.5);
+		int idx=percentileIndex(0.5);
 		return array[idx];
+	}
+	
+	/** Allows unsorted list */
+	public final long min(){
+		if(size<1){return 0;}
+		long x=array[0];
+		for(int i=1; i<size; i++){
+			x=Tools.min(x, array[i]);
+		}
+		return x;
+	}
+	
+	/** Allows unsorted list */
+	public final long max(){
+		if(size<1){return 0;}
+		long x=array[0];
+		for(int i=1; i<size; i++){
+			x=Tools.max(x, array[i]);
+		}
+		return x;
 	}
 	
 	/** Assumes list is sorted */
@@ -153,7 +266,13 @@ public final class LongList{
 		return best;
 	}
 	
-	public int percentile(double fraction){
+	public long percentile(double fraction){
+		if(size<1){return 0;}
+		int idx=percentileIndex(fraction);
+		return array[idx];
+	}
+	
+	public int percentileIndex(double fraction){
 		if(size<2){return size-1;}
 		assert(sorted());
 		double target=(sum()*fraction);
@@ -167,35 +286,67 @@ public final class LongList{
 		return size-1;
 	}
 	
-	//TODO: This could be done in-place.
+//	//TODO: This could be done in-place.
+//	public final void shrinkToUnique(){
+//		//Assumes sorted.
+//		if(size<=0){
+//			shrink();
+//			return;
+//		}
+//		
+//		int unique=1;
+//		
+//		for(int i=1; i<size; i++){
+//			assert(array[i]>=array[i-1]);
+//			if(array[i]!=array[i-1]){unique++;}
+//		}
+//		if(unique==array.length){return;}
+//		long[] alt=KillSwitch.allocLong1D(unique);
+//		
+//		alt[0]=array[0];
+//		for(int i=1, j=1; j<unique; i++){
+//			if(array[i]!=array[i-1]){
+//				alt[j]=array[i];
+//				j++;
+//			}
+//		}
+//		
+//		array=alt;
+//		size=alt.length;
+//	}
+	
 	public final void shrinkToUnique(){
-		//Assumes sorted.
-		if(size<=0){
-			shrink();
-			return;
-		}
-		
-		int unique=1;
-		
-		for(int i=1; i<size; i++){
-			assert(array[i]>=array[i-1]);
-			if(array[i]!=array[i-1]){unique++;}
-		}
-		if(unique==array.length){return;}
-		long[] alt=new long[unique];
-		
-		alt[0]=array[0];
-		for(int i=1, j=1; j<unique; i++){
-			if(array[i]!=array[i-1]){
-				alt[j]=array[i];
-				j++;
-			}
-		}
-		
-		array=alt;
-		size=alt.length;
+		condense();
+		shrink();
 	}
 	
+	//In-place.
+	//Assumes sorted.
+	public final void condense(){
+		if(size<=1){return;}
+		
+		int i=0, j=1;
+		for(; j<size && array[i]<array[j]; i++, j++){}//skip while strictly ascending 
+		
+		int dupes=0;
+		for(; j<size; j++){//This only enters at the first nonascending pair
+			long a=array[i], b=array[j];
+			assert(a<=b) : "Unsorted: "+i+", "+j+", "+a+", "+b;
+			if(b>a){
+				i++;
+				array[i]=b;
+			}else{
+				//do nothing
+				dupes++;
+				assert(a==b);
+			}
+		}
+		assert(dupes==(size-(i+1)));
+		assert(size>=(i+1));
+		size=i+1;
+	}
+	
+	@Override
 	public String toString(){
 		return toStringListView();
 	}
@@ -227,7 +378,7 @@ public final class LongList{
 	}
 	
 	public long[] toArray(){
-		long[] x=new long[size];
+		long[] x=KillSwitch.allocLong1D(size);
 		for(int i=0; i<x.length; i++){
 			x[i]=array[i];
 		}
@@ -235,6 +386,10 @@ public final class LongList{
 	}
 	
 	public void sort() {
+		if(size>1){Shared.sort(array, 0, size);}
+	}
+	
+	public void sortSerial() {
 		if(size>1){Arrays.sort(array, 0, size);}
 	}
 	
@@ -247,6 +402,18 @@ public final class LongList{
 			if(array[i]<array[i-1]){return false;}
 		}
 		return true;
+	}
+	
+	public int size() {
+		return size;
+	}
+	
+	public int capacity() {
+		return array.length;
+	}
+	
+	public int freeSpace() {
+		return array.length-size;
 	}
 	
 	private static final long min(long x, long y){return x<y ? x : y;}

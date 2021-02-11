@@ -1,6 +1,8 @@
 package align2;
 
 import java.util.Arrays;
+
+import shared.Tools;
 public class NeedlemanWunsch {
 	
 	

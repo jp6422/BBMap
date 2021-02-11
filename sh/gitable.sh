@@ -1,27 +1,30 @@
 #!/bin/bash
-#gitable gi_taxid_nucl.dmp.gz gitable.int1d.gz
 
 usage(){
 echo "
 Written by Brian Bushnell.
-Last modified May 11, 2016
+Last modified July 29, 2019
 
-Description:  Creates gitable.int1d from gi_taxid_nucl.dmp and/or gi_taxid_prot.dmp.
-gitable.int1d is a much more efficient representation,
-allowing easy translation of gi numbers to ncbi taxids.
-Dump files are at ftp://ftp.ncbi.nih.gov/pub/taxonomy/
+Description:  Creates gitable.int1d from accession files:
+ftp://ftp.ncbi.nih.gov/pub/taxonomy/accession2taxid/*.accession2taxid.gz
+This is for use of gi numbers, which are deprecated by NCBI, and areneither 
+necessary nor recemmended if accession numbers are present.
+See TaxonomyGuide and fetchTaxonomy.sh for more information.
 
-Usage:  gitable.sh gi_taxid_nucl.dmp.gz,gi_taxid_prot.dmp.gz gitable.int1d.gz
-
+Usage:  gitable.sh shrunk.dead_nucl.accession2taxid.gz,shrunk.dead_prot.accession2taxid.gz,shrunk.dead_wgs.accession2taxid.gz,shrunk.nucl_gb.accession2taxid.gz,shrunk.nucl_wgs.accession2taxid.gz,shrunk.pdb.accession2taxid.gz,shrunk.prot.accession2taxid.gz gitable.int1d.gz
 
 Java Parameters:
--Xmx    This will be passed to Java to set memory usage, overriding the program's automatic memory detection.
-        -Xmx20g will specify 20 gigs of RAM.  The max is typically 85% of physical memory.
+-Xmx            This will set Java's memory usage, overriding autodetection.
+                -Xmx20g will specify 20 gigs of RAM.  The max is typically 85% of physical memory.
+-eoom           This flag will cause the process to exit if an out-of-memory
+                exception occurs.  Requires Java 8u92+.
+-da             Disable assertions.
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -34,11 +37,11 @@ popd > /dev/null
 
 #DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/"
 CP="$DIR""current/"
-NATIVELIBDIR="$DIR""jni/"
+JNI="-Djava.library.path=""$DIR""jni/"
+JNI=""
 
-z="-Xmx12g"
-z2="-Xms12g"
-EA="-ea"
+z="-Xmx24g"
+z2="-Xms24g"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -48,11 +51,12 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 	if [[ $set == 1 ]]; then
 		return
 	fi
-	freeRam 12000m 84
+	freeRam 24000m 84
 	z="-Xmx${RAM}m"
 	z2="-Xms${RAM}m"
 }
@@ -60,12 +64,7 @@ calcXmx "$@"
 
 
 gitable() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-	fi
-	local CMD="java $EA $z $z2 -cp $CP tax.GiToNcbi $@"
+	local CMD="java $EA $EOOM $z $z2 -cp $CP tax.GiToTaxid $@"
 	echo $CMD >&2
 	eval $CMD
 }

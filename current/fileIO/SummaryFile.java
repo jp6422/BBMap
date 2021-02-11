@@ -2,10 +2,9 @@ package fileIO;
 
 import java.io.File;
 
-import align2.Tools;
-
 import dna.Data;
-import dna.Parser;
+import shared.Parse;
+import shared.PreParser;
 
 /**
  * Tests to see if a summary file matches a reference fasta file, based on date, size, and name
@@ -20,6 +19,12 @@ public class SummaryFile {
 			System.out.println("Usage: SummaryFile <summary file> <reference fasta>");
 			System.exit(0);
 		}
+
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
 		
 		String summary=null, ref=null;
 		
@@ -30,11 +35,8 @@ public class SummaryFile {
 				final String[] split=arg.split("=");
 				String a=split[0].toLowerCase();
 				String b=split.length>1 ? split[1] : null;
-				if("null".equalsIgnoreCase(b)){b=null;}
-
-				if(Parser.isJavaFlag(arg)){
-					//jvm argument; do nothing
-				}else if(a.equals("summary")){
+				
+				if(a.equals("summary")){
 					summary=b;
 				}else if(a.equals("ref") || a.equals("reference")){
 					ref=b;
@@ -78,7 +80,7 @@ public class SummaryFile {
 ////				assert(false) : refName+", "+source+": "+(Files.isSameFile(ref.toPath(), new File(source).toPath()))+
 ////						"\n"+ref.getCanonicalPath()+", "+new File(source).getCanonicalPath()+": "+(ref.getCanonicalPath().equals(new File(source).getCanonicalPath()));
 //				return false;
-//				
+//
 //			}
 			if(!refName.equals(source) && !ref.getCanonicalPath().equals(new File(source).getCanonicalPath())){
 //				assert(false) : refName+", "+source+": "+(Files.isSameFile(ref.toPath(), new File(source).toPath()))+
@@ -123,7 +125,7 @@ public class SummaryFile {
 	public SummaryFile(String path){
 		summaryFname=path;
 		String s;
-		TextFile tf=new TextFile(summaryFname, false, false);
+		TextFile tf=new TextFile(summaryFname, false);
 		for(s=tf.nextLine(); s!=null; s=tf.nextLine()){
 			if(s.charAt(0)=='#'){
 				if(s.startsWith("#Version")){
@@ -146,7 +148,7 @@ public class SummaryFile {
 				else if(a.equalsIgnoreCase("source")){source=b;}
 				else if(a.equalsIgnoreCase("bytes")){bytes=Long.parseLong(b);}
 				else if(a.equalsIgnoreCase("last modified")){modified=Long.parseLong(b);}
-				else if(a.equalsIgnoreCase("scafprefixes")){scafprefixes=Tools.parseBoolean(b);}
+				else if(a.equalsIgnoreCase("scafprefixes")){scafprefixes=Parse.parseBoolean(b);}
 				else{throw new RuntimeException("In file "+tf.name+": Unknown term "+s);}
 			}
 		}

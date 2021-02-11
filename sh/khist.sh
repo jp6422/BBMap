@@ -1,5 +1,4 @@
 #!/bin/bash
-#khist in=<infile> out=<outfile>
 
 usage(){
 echo "
@@ -12,6 +11,7 @@ All the flags are the same, only the parameters (near the bottom of this file) d
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -27,7 +27,6 @@ CP="$DIR""current/"
 
 z="-Xmx31g"
 z2="-Xms31g"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -37,6 +36,7 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 	if [[ $set == 1 ]]; then
 	return
@@ -48,12 +48,7 @@ calcXmx () {
 calcXmx "$@"
 
 khist() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-	fi
-	local CMD="java $EA $z $z2 -cp $CP jgi.KmerNormalize bits=32 ecc=f passes=1 keepall dr=f prefilter hist=stdout minprob=0 minqual=0 mindepth=0 minkmers=1 hashes=3 $@"
+	local CMD="java $EA $EOOM $z $z2 -cp $CP jgi.KmerNormalize bits=32 ecc=f passes=1 keepall dr=f prefilter hist=stdout minprob=0 minqual=0 mindepth=0 minkmers=1 hashes=3 $@"
 	echo $CMD >&2
 	eval $CMD
 }

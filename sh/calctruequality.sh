@@ -1,46 +1,113 @@
 #!/bin/bash
-#calctruequality in=<infile> out=<outfile>
 
 usage(){
 echo "
 Written by Brian Bushnell
-Last modified December 11, 2015
+Last modified March 21, 2019
 
-Description:  Calculates the observed quality scores from a sam file.
-Generates matrices for use in recalibrating quality scores.
+Description:  Calculates observed quality scores from mapped sam/bam files.
+Generates matrices for use in recalibrating quality scores.  By default, 
+the matrices are written to /ref/qual/ in the current directory.
 
-Usage:        calctruequality.sh in=<file,file,...file> path=<directory>
+If you have multiple sam/bam files demultiplexed from a single sequencing run,
+it is recommended to use all of them as input for increased statistical power.
+Once the matrices are generated, recalibration can be done on mapped or
+unmapped reads; you may get better results by recalibrating the fastq and 
+remapping the calibrated reads.
+
+Note!  Diploid organisms with a high heterozygousity rate will induce
+inaccurate recalibration at the high end of the quality scale unless SNP
+locations are masked or variations are called.  For example, recalibrating 
+human reads mapped to an unmasked human reference would generate an 
+expected maximal Q-score of roughly 30 due to the human 1/1000 SNP rate.
+Variations can be ignored by using the callvars flag or providing
+a file of variations.
+
+Usage:
+
+Step 1.  Generate matrices (from mapped sam or bam files):
+calctruequality.sh in=<file,file,...file> path=<directory>
+
+Step 2.  Recalibrate reads (any kind of files):
+bbduk.sh in=<file> out=<file> recalibrate
 
 
 Parameters (and their defaults)
 
 Input parameters:
-in=<file,file>      Sam file or comma-delimited list of files.  Must use = and X cigar symbols.
+in=<file,file>      Sam file or comma-delimited list of files.  Alignments 
+                    must use = and X cigar symbols, or have MD tags, or
+                    ref must be specified.
 reads=-1            Stop after processing this many reads (if positive).
+samstreamer=t       (ss) Load reads multithreaded to increase speed.
+unpigz=t            Use pigz to decompress.
 
 Output parameters:
 overwrite=t         (ow) Set to true to allow overwriting of existing files.
 path=.              Directory to write quality matrices (within /ref subdir).
 write=t             Write matrices.
 showstats=t         Print a summary.
+pigz=f              Use pigz to compress.
 
 Other parameters:
-t=auto
-pigz=f              Use pigz to compress.  If argument is a number, that will set the number of pigz threads.
-unpigz=t            Use pigz to decompress.
-passes=2            Generate matrices for 1-pass recalibration only.  Max is 2.
-recalqmax=42        Adjust max quality scores tracked.
+t=auto              Number of worker threads.
+passes=2            Recalibration passes, 1 or 2.  2 is slower but gives more
+                    accurate quality scores.
+recalqmax=42        Adjust max quality scores tracked.  The actual highest
+                    quality score allowed is recalqmax-1.
+trackall=f          Track all available quality metrics and produce all
+                    matrices, including the ones that are not selected for 
+                    quality adjustment.  Reduces speed, but allows testing the
+                    effects of different recalibration matrices.
+indels=t            Include indels in quality calculations.
+
+Variation calling:
+varfile=<file>      Use the variants in this var file, instead of calling
+                    variants.  The format can be produced by CallVariants.
+vcf=<file>          Use the variants in this VCF file, instead of
+                    calling variants.
+callvars=f          Call SNPs, and do not count them as errors.
+ploidy=1            Set the organism's ploidy.
+ref=                Required for variation-calling.
+
+*** 'Variant-Calling Cutoffs' flags in callvariants.sh are also supported ***
+
+Selecting matrices:
 loadq102=           For each recalibration matrix, enable or disable that matrix with t/f.
                     You can specify pass1 or pass2 like this: loadq102_p1=f loadq102_p2=t.
+                    The default is loadqbp_p1=t loadqbp_p2=t loadqb123_p=t.
+clearmatrices=f     If true, clear all the existing matrix selections.  For example:
+                    'clearmatrices loadqbp_p1'
+                    This would ignore defaults and select only qbp for the first pass.
+
+Available matrices:
+q102                Quality, leading quality, trailing quality.
+qap                 Quality, average quality, position.
+qbp                 Quality, current base, position.
+q10                 Quality, leading quality.
+q12                 Quality, trailing quality.
+qb12                Quality, leading base, current base.
+qb012               Quality, two leading bases, current base.
+qb123               Quality, leading base, current base, trailing base.
+qb234               Quality, current base, two trailing bases.
+q12b12              Quality, trailing quality, leading base, current base.
+qp                  Quality, position.
+q                   Current quality score only.
+
 
 Java Parameters:
--Xmx                This will be passed to Java to set memory usage, overriding the program's automatic memory detection.
-                    -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.  The max is typically 85% of physical memory.
+-Xmx                This will set Java's memory usage, overriding autodetection.
+                    -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.
+                    The max is typically 85% of physical memory.
+-eoom               This flag will cause the process to exit if an
+                    out-of-memory exception occurs.  Requires Java 8u92+.
+-da                 Disable assertions.
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -54,9 +121,8 @@ popd > /dev/null
 #DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/"
 CP="$DIR""current/"
 
-z="-Xmx1g"
-z2="-Xms1g"
-EA="-ea"
+z="-Xmx2g"
+z2="-Xms2g"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -66,21 +132,19 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 	if [[ $set == 1 ]]; then
 		return
 	fi
+	freeRam 3200m 84
+	z="-Xmx${RAM}m"
+	z2="-Xms${RAM}m"
 }
 calcXmx "$@"
 
 calctruequality() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-		module load samtools
-	fi
-	local CMD="java $EA $z -cp $CP jgi.CalcTrueQuality $@"
+	local CMD="java $EA $EOOM $z $z2 -cp $CP jgi.CalcTrueQuality $@"
 	echo $CMD >&2
 	eval $CMD
 }

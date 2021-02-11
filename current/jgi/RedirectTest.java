@@ -5,9 +5,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 import dna.Data;
-
 import fileIO.PipeThread;
 import fileIO.ReadWrite;
+import shared.Shared;
 
 /**
  * @author Brian Bushnell
@@ -33,7 +33,7 @@ public class RedirectTest {
 		System.out.println("Pigz="+Data.PIGZ());
 		System.out.println("Gunzip="+Data.GUNZIP());
 		
-		if(Data.WINDOWS){
+		if(Shared.WINDOWS){
 			System.out.println("WINDOWS");
 			in=ReadWrite.getInputStream(fin, false, false);
 		}else{

@@ -4,14 +4,13 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-
-import align2.Shared;
-import align2.Tools;
 
 import dna.Data;
 import fileIO.TextStreamWriter;
+import shared.Shared;
+import shared.Tools;
+import structures.ByteBuilder;
 
 /**
  * @author Brian Bushnell
@@ -61,7 +60,7 @@ public class SamHeader {
 				sb.setLength(0);
 			}
 		}
-		if(sort){Collections.sort(list);}
+		if(sort){Shared.sort(list);}
 		return list;
 	}
 
@@ -178,7 +177,7 @@ public class SamHeader {
 				//				sb.append("\tLN:"+Tools.min(Integer.MAX_VALUE, (Data.scaffoldLengths[i][j]+1000L)));
 				//				sb.append("\tAS:"+((Data.name==null ? "" : Data.name+" ")+"b"+Data.GENOME_BUILD).replace('\t', ' '));
 
-				bb.append('\n');
+				bb.nl();
 
 				if(bb.length>=32768){
 					try {

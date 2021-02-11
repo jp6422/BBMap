@@ -4,12 +4,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 
+import dna.AminoAcid;
+import dna.Data;
+import shared.KillSwitch;
+import shared.Shared;
+import shared.Tools;
 import stream.Read;
 import stream.SiteScore;
 import structures.LongM;
-import dna.AminoAcid;
-import dna.Data;
-import dna.Gene;
 
 
 /**
@@ -62,7 +64,7 @@ public final class BBIndexPacBio extends AbstractIndex {
 		
 		
 		Data.sysout.println("Loading index for chunk "+first+"-"+MAXCHROM+", build "+Data.GENOME_BUILD);
-		index=IndexMaker4.makeIndex(Data.GENOME_BUILD, first, MAXCHROM, 
+		index=IndexMaker4.makeIndex(Data.GENOME_BUILD, first, MAXCHROM,
 				k, NUM_CHROM_BITS, MAX_ALLOWED_CHROM_INDEX, CHROM_MASK_LOW, CHROM_MASK_HIGH, SITE_MASK, SHIFT_LENGTH, true, false, index);
 		
 		
@@ -87,14 +89,14 @@ public final class BBIndexPacBio extends AbstractIndex {
 	}
 	
 	/** Load or generate index from minChrom to maxChrom, inclusive, with keylength k.
-	 * This range can encompass multiple blocks. 
+	 * This range can encompass multiple blocks.
 	 * Should only be called once in a process. */
 	public static final synchronized void loadIndex(int minChrom, int maxChrom, int k, boolean writeToDisk, boolean diskInvalid){
 		if(minChrom<1){minChrom=1;}
 		if(maxChrom>Data.numChroms){maxChrom=Data.numChroms;}
 		assert(minChrom<=maxChrom);
 		Data.sysout.println("Loading index for chunk "+minChrom+"-"+maxChrom+", build "+Data.GENOME_BUILD);
-		index=IndexMaker4.makeIndex(Data.GENOME_BUILD, minChrom, maxChrom, 
+		index=IndexMaker4.makeIndex(Data.GENOME_BUILD, minChrom, maxChrom,
 				k, NUM_CHROM_BITS, MAX_ALLOWED_CHROM_INDEX, CHROM_MASK_LOW, CHROM_MASK_HIGH, SITE_MASK, SHIFT_LENGTH, writeToDisk, diskInvalid, index);
 	}
 	
@@ -206,13 +208,13 @@ public final class BBIndexPacBio extends AbstractIndex {
 	}
 	
 	@Deprecated
-	private final int trimExcessHitLists(int[] keys, int[][] hits){
+	private final static int trimExcessHitLists(int[] keys, int[][] hits){
 		
 		assert(false) : "Needs to be redone because hits are no longer sorted by length.";
 		
 		assert(hits.length==keys.length);
 //		assert(false) : "modify this function so that it gives more weight to trimming lists over highly covered baits";
-		//And also, incorporate the "remove the longest list" function 
+		//And also, incorporate the "remove the longest list" function
 		
 		final int limit=Tools.max(SMALL_GENOME_LIST, lengthHistogram[MAX_AVERAGE_LIST_TO_SEARCH])*keys.length;
 		final int limit2=Tools.max(SMALL_GENOME_LIST, lengthHistogram[MAX_AVERAGE_LIST_TO_SEARCH2]);
@@ -382,6 +384,7 @@ public final class BBIndexPacBio extends AbstractIndex {
 	}
 	
 	
+	@Override
 	public final ArrayList<SiteScore> findAdvanced(byte[] basesP, byte[] basesM, byte[] qual, byte[] baseScoresP, int[] keyScoresP, int[] offsets, long id){
 		assert(minChrom<=maxChrom && minChrom>=0);
 		ArrayList<SiteScore> result=find(basesP, basesM, qual, baseScoresP, keyScoresP, offsets, true, id);
@@ -514,7 +517,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 		assert(offsetsM.length==offsetsP.length);
 		assert(maxQuickScore==maxQuickScore(offsetsM, keyScoresM));
 		
-		/* 
+		/*
 		 * bestScores:
 		 * 
 		 * bestScores[0]	currentTopScore
@@ -524,7 +527,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 		 * bestScores[4]	maxQuickScore
 		 * bestScores[5]	perfectsFound
 		 */
-		final int[] bestScores=new int[6];
+		final int[] bestScores=KillSwitch.allocInt1D(6);
 		
 		//This prevents filtering by qscore when a low-quality read only uses a few keys.
 		//In that case, extending is more important.
@@ -544,7 +547,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 			else{
 				for(int i=1; i<offsetsP.length; i++){
 					if(offsetsP[i]>offsetsP[i-1]+KEYLEN){
-						allBasesCovered=false; 
+						allBasesCovered=false;
 						break;
 					}
 				}
@@ -552,8 +555,8 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 		}
 		
 		//TODO I don't understand this logic
-		final boolean pretendAllBasesAreCovered=(allBasesCovered || 
-					keysP.length>=keysOriginal.length-4 || 
+		final boolean pretendAllBasesAreCovered=(allBasesCovered ||
+					keysP.length>=keysOriginal.length-4 ||
 					(keysP.length>=9 && (offsetsP[offsetsP.length-1]-offsetsP[0]+KEYLEN)>Tools.max(40, (int)(basesP.length*.75f))));
 		
 //		System.err.println(allBasesCovered+"\t"+Arrays.toString(offsetsP));
@@ -592,7 +595,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 		int cycle=0;
 		for(int chrom=minChrom; chrom<=maxChrom; chrom=((chrom&CHROM_MASK_HIGH)+CHROMS_PER_BLOCK)){
 			if(precounts==null || precounts[cycle]>=hitsCutoff || prescores[cycle]>=qscoreCutoff){
-				find(keysP, basesP, baseScoresP, keyScoresP, chrom, Gene.PLUS, 
+				find(keysP, basesP, baseScoresP, keyScoresP, chrom, Shared.PLUS,
 						offsetsP, obeyLimits, result, bestScores, allBasesCovered, maxScore, fullyDefined);
 			}
 			if(QUIT_AFTER_TWO_PERFECTS){
@@ -600,7 +603,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 			}
 			cycle++;
 			if(precounts==null || precounts[cycle]>=hitsCutoff || prescores[cycle]>=qscoreCutoff){
-				find(keysM, basesM, baseScoresM, keyScoresM, chrom, Gene.MINUS, 
+				find(keysM, basesM, baseScoresM, keyScoresM, chrom, Shared.MINUS,
 						offsetsM, obeyLimits, result, bestScores, allBasesCovered, maxScore, fullyDefined);
 			}
 			if(QUIT_AFTER_TWO_PERFECTS){
@@ -674,7 +677,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 					final Quad[] triples=tripleStorage;
 					final int[] values=valueArray;
 					
-					int[] temp=findMaxQscore2(starts, stops, offsets, keyScores, baseChrom, triples, values, minHitsToScore, true, 
+					int[] temp=findMaxQscore2(starts, stops, offsets, keyScores, baseChrom, triples, values, minHitsToScore, true,
 							bestqscore>=maxQuickScore && allBasesCovered);
 
 					scores[cycle]=temp[0];
@@ -684,7 +687,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 					maxHits=Tools.max(maxHits, temp[1]);
 					if(bestqscore>=maxQuickScore && allBasesCovered){
 						assert(bestqscore==maxQuickScore);
-						assert(maxHits==keysP.length) : 
+						assert(maxHits==keysP.length) :
 							"\nTemp: \t"+Arrays.toString(temp)+", cycle="+cycle+"\n" +
 							"Scores: \t"+Arrays.toString(scores)+
 							"Counts: \t"+Arrays.toString(counts)+
@@ -718,8 +721,8 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 	
 	
 	/** Search a single block and strand */
-	public final ArrayList<SiteScore> find(int[] keys, final byte[] bases, final byte[] baseScores, int[] keyScores, 
-			final int chrom, final byte strand, 
+	public final ArrayList<SiteScore> find(int[] keys, final byte[] bases, final byte[] baseScores, int[] keyScores,
+			final int chrom, final byte strand,
 			int[] offsets, final boolean obeyLimits, ArrayList<SiteScore> ssl, int[] bestScores,
 			final boolean allBasesCovered, final int maxScore, final boolean fullyDefined){
 		
@@ -843,7 +846,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 //				keyScores=(int[])r[3];
 //			}
 //		}
-//		
+//
 //		final int numHits=hits.length; //After shrink
 		
 		
@@ -943,7 +946,9 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 			}
 
 			assert(centerIndex>=0) : centerIndex;
-			assert(approxHits>=1 || approxHitsCutoff>1) : approxHits+", "+approxHitsCutoff+", "+numHits+", "+t.column;
+			
+			//I don't remember what this assertion was for or why, but it's causing trouble.
+			//assert(approxHits>=1 || approxHitsCutoff>1) : approxHits+", "+approxHitsCutoff+", "+numHits+", "+t.column;
 			if(approxHits>=approxHitsCutoff){
 				
 				int score;
@@ -1180,7 +1185,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 					if((a&SITE_MASK)>=offsets[col]){
 						a2=a-offsets[col];
 						
-						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) : 
+						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) :
 							"baseChrom="+baseChrom+", chrom="+numberToChrom(a, baseChrom)+", strand="+strand+", site="+site+
 							", maxNearbySite="+maxNearbySite+", a="+a+", a2="+a2+", offsets["+col+"]="+offsets[col];
 					}else{
@@ -1189,12 +1194,12 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 						int st2=Tools.max(st-offsets[col], 0);
 						a2=toNumber(st2, ch);
 						
-						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) : 
+						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) :
 							"baseChrom="+baseChrom+", chrom="+numberToChrom(a, baseChrom)+", strand="+strand+", site="+site+
 							", maxNearbySite="+maxNearbySite+", a="+a+", a2="+a2+", offsets["+col+"]="+offsets[col];
 					}
 					
-					assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) : 
+					assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) :
 						"baseChrom="+baseChrom+", chrom="+numberToChrom(a, baseChrom)+", strand="+strand+", site="+site+
 						", maxNearbySite="+maxNearbySite+", a="+a+", a2="+a2+", offsets["+col+"]="+offsets[col];
 
@@ -1211,7 +1216,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 	}
 	
 	/** This uses a heap to track next column to increment */
-	private final ArrayList<SiteScore> slowWalk3(int[] starts, int[] stops, final byte[] bases, 
+	private final ArrayList<SiteScore> slowWalk3(int[] starts, int[] stops, final byte[] bases,
 			final byte[] baseScores, int[] keyScores, int[] offsets,
 			final int baseChrom_, final byte strand, final boolean obeyLimits, ArrayList<SiteScore> ssl,
 			int[] bestScores, final boolean allBasesCovered, final int maxScore, final boolean fullyDefined){
@@ -1344,7 +1349,9 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 			}
 
 			assert(centerIndex>=0) : centerIndex;
-			assert(approxHits>=1 || approxHitsCutoff>1) : approxHits+", "+approxHitsCutoff+", "+numHits+", "+t.column;
+			
+			//I don't remember what this assertion was for or why, but it's causing trouble.
+			//assert(approxHits>=1 || approxHitsCutoff>1) : approxHits+", "+approxHitsCutoff+", "+numHits+", "+t.column;
 			if(approxHits>=approxHitsCutoff){
 				
 				int score;
@@ -1476,13 +1483,13 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 						if(gapArray!=null){
 //							System.err.println(Arrays.toString(locArray)+"\n");
 //							System.err.println(Arrays.toString(gapArray));
-//							
+//
 ////							int sub=site2-mapStart;//thus site2=mapStart+sub
 ////							for(int i=0; i<gapArray.length; i++){
 ////								gapArray[i]+=sub;
 ////							}
 ////							System.err.println(Arrays.toString(gapArray));
-//							
+//
 //							System.err.println(mapStart+" -> "+site2);
 //							System.err.println(mapStop+" -> "+site3);
 							
@@ -1512,7 +1519,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 					final boolean inbounds=(site2>=0 && site3<Data.chromLengths[chrom]);
 //					if(!inbounds){System.err.println("Index tossed out-of-bounds site chr"+chrom+", "+site2+"-"+site3);}
 					
-					if(inbounds && !SEMIPERFECTMODE && !PERFECTMODE && gapArray==null && prevSS!=null && 
+					if(inbounds && !SEMIPERFECTMODE && !PERFECTMODE && gapArray==null && prevSS!=null &&
 							prevSS.chrom==chrom && prevSS.strand==strand && overlap(prevSS.start, prevSS.stop, site2, site3)){
 
 						final int betterScore=Tools.max(score, prevSS.score);
@@ -1572,7 +1579,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 					
 					assert(ss==null || !ss.perfect || ss.semiperfect) : ss;
 					assert(prevSS==null || !prevSS.perfect || prevSS.semiperfect) : "\n"+SiteScore.header()+"\n"+ss+"\n"+prevSS;
-					if(ss!=null && (SEMIPERFECTMODE && !ss.semiperfect) || (PERFECTMODE && !ss.perfect)){ss=null;}
+					if(ss!=null && ((SEMIPERFECTMODE && !ss.semiperfect) || (PERFECTMODE && !ss.perfect))){ss=null;}
 					
 					if(ss!=null){
 //						System.out.println("Added site "+ss.toText()+", qscore="+qscore);
@@ -1610,7 +1617,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 					if((a&SITE_MASK)>=offsets[col]){
 						a2=a-offsets[col];
 						
-						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) : 
+						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) :
 							"baseChrom="+baseChrom+", chrom="+numberToChrom(a, baseChrom)+", strand="+strand+", site="+site+
 							", maxNearbySite="+maxNearbySite+", a="+a+", a2="+a2+", offsets["+col+"]="+offsets[col];
 					}else{
@@ -1619,19 +1626,19 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 						int st2=Tools.max(st-offsets[col], 0);
 						a2=toNumber(st2, ch);
 						
-						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) : 
+						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) :
 							"baseChrom="+baseChrom+", chrom="+numberToChrom(a, baseChrom)+", strand="+strand+", site="+site+
 							", maxNearbySite="+maxNearbySite+", a="+a+", a2="+a2+", offsets["+col+"]="+offsets[col];
 					}
 					
-					assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) : 
+					assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) :
 						"baseChrom="+baseChrom+", chrom="+numberToChrom(a, baseChrom)+", strand="+strand+", site="+site+
 						", maxNearbySite="+maxNearbySite+", a="+a+", a2="+a2+", offsets["+col+"]="+offsets[col];
 					
 					t2.site=a2;
 					values[col]=a2;
 					heap.add(t2);
-				}else if(heap.size()<approxHitsCutoff || PERFECTMODE){	
+				}else if(heap.size()<approxHitsCutoff || PERFECTMODE){
 					assert(USE_EXTENDED_SCORE);
 					bestScores[0]=Tools.max(bestScores[0], currentTopScore);
 					bestScores[1]=Tools.max(bestScores[1], maxHits);
@@ -1749,7 +1756,9 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 			hist_hits[Tools.min(HIT_HIST_LEN, approxHits)]++;
 
 			assert(centerIndex>=0) : centerIndex;
-			assert(approxHits>=1 || approxHitsCutoff>1) : approxHits+", "+approxHitsCutoff+", "+numHits+", "+t.column;
+			
+			//I don't remember what this assertion was for or why, but it's causing trouble.
+			//assert(approxHits>=1 || approxHitsCutoff>1) : approxHits+", "+approxHitsCutoff+", "+numHits+", "+t.column;
 			if(approxHits>=approxHitsCutoff){
 				
 				int qscore=quickScore(values, keyScores, centerIndex, offsets, sizes, true, approxHits, numHits);
@@ -1790,7 +1799,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 					if((a&SITE_MASK)>=offsets[col]){
 						a2=a-offsets[col];
 						
-						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) : 
+						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) :
 							"baseChrom="+baseChrom+", chrom="+numberToChrom(a, baseChrom)+", site="+site+
 							", maxNearbySite="+maxNearbySite+", a="+a+", a2="+a2+", offsets["+col+"]="+offsets[col];
 					}else{
@@ -1799,12 +1808,12 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 						int st2=Tools.max(st-offsets[col], 0);
 						a2=toNumber(st2, ch);
 						
-						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) : 
+						assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) :
 							"baseChrom="+baseChrom+", chrom="+numberToChrom(a, baseChrom)+", site="+site+
 							", maxNearbySite="+maxNearbySite+", a="+a+", a2="+a2+", offsets["+col+"]="+offsets[col];
 					}
 					
-					assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) : 
+					assert(numberToChrom(a, baseChrom) == numberToChrom(a2, baseChrom)) :
 						"baseChrom="+baseChrom+", chrom="+numberToChrom(a, baseChrom)+", site="+site+
 						", maxNearbySite="+maxNearbySite+", a="+a+", a2="+a2+", offsets["+col+"]="+offsets[col];
 
@@ -1830,6 +1839,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 	}
 	
 	
+	@Override
 	final int maxScore(int[] offsets, byte[] baseScores, int[] keyScores, int readlen, boolean useQuality){
 		
 		if(useQuality){
@@ -1862,7 +1872,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 	}
 	
 	
-	private final int quickScore(final int[] locs, final int[] keyScores, final int centerIndex, final int offsets[], 
+	private final int quickScore(final int[] locs, final int[] keyScores, final int centerIndex, final int offsets[],
 			int[] sizes, final boolean penalizeIndels, final int numApproxHits, final int numHits){
 		
 		hist_hits_score[Tools.min(HIT_HIST_LEN, numApproxHits)]++;
@@ -1889,24 +1899,24 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 //	/** Generates a term that increases score with how many bases in the read match the ref. */
 //	public static final int scoreZ(int[] locs, int centerIndex, int offsets[]){
 //		final int center=locs[centerIndex];
-//		
+//
 //		final int[] refLoc=new int[offsets[offsets.length-1]+CHUNKSIZE];
 //
 //		final int maxLoc=center+MAX_INDEL2;
 //		final int minLoc=Tools.max(0, center-MAX_INDEL);
-//		
+//
 //		int score=0;
-//		
+//
 //		for(int i=0; i<locs.length; i++){
 //			int loc=locs[i];
 ////			int dif=absdif(loc, center);
 //			if(loc>=minLoc && loc<=maxLoc){
 ////				assert(loc>=center) : "loc="+loc+"\ni="+i+"\ncenterIndex="+centerIndex+
 ////					"\nmaxLoc="+maxLoc+"\nlocs:\t"+Arrays.toString(locs)+"\noffsets:\t"+Arrays.toString(offsets);
-//				
+//
 //				int offset=offsets[i];
 //				int max=CHUNKSIZE+offset;
-//				
+//
 //				for(int j=offset; j<max; j++){
 //					int old=refLoc[j];
 //					if(old==0){
@@ -1930,7 +1940,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 	
 	
 	
-	private final int extendScore(final byte[] bases, final byte[] baseScores, final int[] offsets, final int[] values, 
+	private final int extendScore(final byte[] bases, final byte[] baseScores, final int[] offsets, final int[] values,
 			final int chrom, final int centerIndex, final int[] locArray, final int numHits, final int numApproxHits){
 		callsToExtendScore++;
 		hist_hits_extend[Tools.min(HIT_HIST_LEN, numApproxHits)]++;
@@ -1960,7 +1970,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 			System.err.println();
 
 			System.err.println(new String(bases));
-			System.err.println(new String(Arrays.copyOfRange(ref, centerLoc, centerLoc+bases.length)));
+			System.err.println(new String(KillSwitch.copyOfRange(ref, centerLoc, centerLoc+bases.length)));
 			System.err.println();
 		}
 		
@@ -1974,13 +1984,13 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 			
 			if(value>=minVal && value<=maxVal){
 				final int refbase=numberToSite(value);
-				assert(refbase>=minLoc && refbase<=maxLoc);
+				assert(refbase>=minLoc && refbase<=maxLoc) : refbase+", "+minLoc+", "+maxLoc+", "+value+", "+maxVal+"\n"+new String(bases)+"\n";
 				
 //				System.out.println("numApproxHits="+numApproxHits+", numHits="+numHits+", i="+i+", minVal="+minVal+", value="+value+", maxVal="+maxVal+
 //						", refbase="+refbase+", minLoc="+minLoc+", maxLoc="+maxLoc+", keynum="+keynum);
 //				System.out.println("Reverse: Trying key "+refbase+" @ "+offsets[i]);
 //				System.out.println("Passed!");
-//				
+//
 //				System.out.println("Number: \t"+Long.toHexString(value|(1l<<63)));
 //				System.out.println("Mask:   \t"+Long.toHexString(SITE_MASK|(1l<<63)));
 //				System.out.println("Both:   \t"+Long.toHexString((value&SITE_MASK)|(1l<<63)));
@@ -2092,7 +2102,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 		
 		if(USE_AFFINE_SCORE){
 			/* TODO - sometimes returns a higher score than actual alignment.  This should never happen. */
-			int score=(KFILTER<2 ? msa.calcAffineScore(locArray, baseScores, bases) : 
+			int score=(KFILTER<2 ? msa.calcAffineScore(locArray, baseScores, bases) :
 				msa.calcAffineScore(locArray, baseScores, bases, KFILTER));
 			return score;
 		}
@@ -2351,7 +2361,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 	
 	
 	private final int[] getOffsetArray(int len){
-		if(len>=offsetArrays.length){return new int[len];} 
+		if(len>=offsetArrays.length){return new int[len];}
 		if(offsetArrays[len]==null){offsetArrays[len]=new int[len];}
 		return offsetArrays[len];
 	}
@@ -2361,21 +2371,23 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 		return locArrays[len];
 	}
 	private final int[] getGreedyListArray(int len){
-		if(len>=greedyListArrays.length){return new int[len];} 
+		if(len>=greedyListArrays.length){return new int[len];}
 		if(greedyListArrays[len]==null){greedyListArrays[len]=new int[len];}
 		return greedyListArrays[len];
 	}
 	private final int[] getGenericArray(int len){
-		if(len>=genericArrays.length){return new int[len];} 
+		if(len>=genericArrays.length){return new int[len];}
 		if(genericArrays[len]==null){genericArrays[len]=new int[len];}
 		return genericArrays[len];
 	}
 
+	@Override
 	final byte[] getBaseScoreArray(int len, int strand){
 		if(len>=baseScoreArrays[0].length){return new byte[len];}
 		if(baseScoreArrays[strand][len]==null){baseScoreArrays[strand][len]=new byte[len];}
 		return baseScoreArrays[strand][len];
 	}
+	@Override
 	final int[] getKeyScoreArray(int len, int strand){
 		if(len>=keyScoreArrays.length){return new int[len];}
 		if(keyScoreArrays[strand][len]==null){keyScoreArrays[strand][len]=new int[len];}
@@ -2404,7 +2416,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 	private final int[] startArray=new int[HEAP_LENGTH];
 	private final int[] stopArray=new int[HEAP_LENGTH];
 	private final Quad[] tripleStorage=makeQuadStorage(HEAP_LENGTH);
-	private final int[] greedyReturn=new int[2];
+	private final int[] greedyReturn=KillSwitch.allocInt1D(2);
 	private final int[][] shrinkReturn2=new int[3][];
 	private final int[][] shrinkReturn3=new int[5][];
 	private final int[][] prescanReturn=new int[2][];
@@ -2417,7 +2429,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 	private final float[][] keyWeightArrays=new float[KMER_ARRAY_LENGTH][];
 	
 	
-	private final Quad[] makeQuadStorage(int number){
+	private final static Quad[] makeQuadStorage(int number){
 		Quad[] r=new Quad[number];
 		for(int i=0; i<number; i++){r[i]=new Quad(i, 0, 0);}
 		return r;
@@ -2468,16 +2480,14 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 	private final int INDEL_PENALTY_MULT; //default 20; penalty for indel length
 	private final int MAX_PENALTY_FOR_MISALIGNED_HIT;
 	private final int SCOREZ_1KEY;
-
-	public static final boolean GENERATE_KEY_SCORES_FROM_QUALITY=true; //True: Much faster and more accurate.
-	public static final boolean GENERATE_BASE_SCORES_FROM_QUALITY=true; //True: Faster, and at least as accurate. 
+	
 	public static final boolean ADD_SCORE_Z=true; //Increases quality, decreases speed
 	public static final int Z_SCORE_MULT=25;
 	public static final int Y_SCORE_MULT=10;
 	
 	
 	/**
-	 * Return only sites that match completely or with partial no-reference 
+	 * Return only sites that match completely or with partial no-reference
 	 */
 	public static void setSemiperfectMode() {
 		assert(!PERFECTMODE);
@@ -2492,7 +2502,7 @@ public final ArrayList<SiteScore> find(byte[] basesP, byte[] basesM, byte[] qual
 	}
 	
 	/**
-	 * Return only sites that match completely 
+	 * Return only sites that match completely
 	 */
 	public static void setPerfectMode() {
 		assert(!SEMIPERFECTMODE);

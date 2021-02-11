@@ -1,6 +1,6 @@
 package bloom;
 
-import align2.Shared;
+import shared.Shared;
 
 /**
  * @author Brian Bushnell
@@ -48,6 +48,8 @@ public abstract class KmerCountAbstract {
 	public static final boolean verbose=false;
 	public static boolean PREJOIN=false;
 	public static boolean CANONICAL=false;
-	public static boolean KEEP_DUPLICATE_KMERS=false;
+	public static boolean KEEP_DUPLICATE_KMERS=true;
+	public static boolean SKETCH_MODE=false;
+	public static boolean STORE_HASHED=false;
 	
 }

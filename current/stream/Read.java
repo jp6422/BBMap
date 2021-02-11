@@ -5,20 +5,17 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 
-import ukmer.Kmer;
-
-import jgi.Dedupe;
-
 import align2.GapTools;
 import align2.QualityTools;
-import align2.Shared;
-import align2.Tools;
-import align2.TrimRead;
-
 import dna.AminoAcid;
 import dna.ChromosomeArray;
 import dna.Data;
-import dna.Gene;
+import shared.KillSwitch;
+import shared.Shared;
+import shared.Tools;
+import shared.TrimRead;
+import structures.ByteBuilder;
+import ukmer.Kmer;
 
 public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	
@@ -42,28 +39,29 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	}
 	
 	public Read(byte[] bases_, byte[] quals_, long id_){
-		this(bases_, quals_, id_, Long.toString(id_));
+		this(bases_, quals_, Long.toString(id_), id_);
 	}
 	
-	public Read(byte[] bases_, byte[] quals_, long id_, String name_){
-		this(bases_, -1, (byte)0, 0, 0, name_, quals_, id_);
+	public Read(byte[] bases_, byte[] quals_, String name_, long id_){
+		this(bases_, quals_, name_, id_, 0, -1, -1, -1);
 	}
 	
-	public Read(byte[] s_, int chrom_, byte strand_, int start_, int stop_, long id_, byte[] quality_){
-		this(s_, chrom_, strand_, start_, stop_, Long.toString(id_), quality_, id_);
+	public Read(byte[] bases_, byte[] quals_, String name_, long id_, int flag_){
+		this(bases_, quals_, name_, id_, flag_, -1, -1, -1);
 	}
 	
-//	public Read(byte[][] fasta_, byte[][] qual_, long numericID_){
-//		this(fasta_[1], 0, (byte)0, 0, 0, new String(fasta_[0]), qual_[1], numericID_);
+	public Read(byte[] s_, byte[] quals_, long id_, int chrom_, int start_, int stop_, byte strand_){
+		this(s_, quals_, Long.toString(id_), id_, (int)strand_, chrom_, start_, stop_);
+	}
+	
+//	public Read(byte[] bases_, byte[] quals_, String id_, long numericID_, byte strand_, int chrom_, int start_, int stop_){
+//		this(bases_, quals_, id_, numericID_, (int)strand_, chrom_, start_, stop_);
+//		assert(strand_==0 || strand_==1);
+//		assert(start_<=stop_) : chrom_+", "+start_+", "+stop_+", "+numericID_;
 //	}
 	
-	public Read(byte[] s_, int chrom_, byte strand_, int start_, int stop_, String id_, byte[] quality_, long numericID_){
-		this(s_, chrom_, start_, stop_, id_, quality_, numericID_, strand_);
-		assert(strand_==0 || strand_==1);
-		assert(start_<=stop_) : chrom_+", "+start_+", "+stop_+", "+numericID_;
-	}
-	
-	public Read(byte[] bases_, int chrom_, int start_, int stop_, String id_, byte[] quals_, long numericID_, int flags_){
+	/** Note that strand can be used as flag */
+	public Read(byte[] bases_, byte[] quals_, String id_, long numericID_, int flags_, int chrom_, int start_, int stop_){
 		flags=flags_&~VALIDATEDMASK;
 		bases=bases_;
 		quality=quals_;
@@ -74,167 +72,529 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		
 		id=id_;
 		numericID=numericID_;
-		
+
+//		assert(amino()) : Shared.AMINO_IN;//123
 		if(VALIDATE_IN_CONSTRUCTOR){validate(true);}
 	}
+	
+	/*--------------------------------------------------------------*/
+	/*----------------          Validation          ----------------*/
+	/*--------------------------------------------------------------*/
 	
 	public boolean validate(final boolean processAssertions){
 		assert(!validated());
 		
-		if(false){//This causes problems with error-corrected PacBio reads.
-			boolean x=(quality==null || quality.length<1 || quality[0]<=80 || !FASTQ.DETECT_QUALITY || FASTQ.IGNORE_BAD_QUALITY);
-			if(!x){
-				if(processAssertions){
-					KillSwitch.kill("Quality value ("+quality[0]+") appears too high.\n"+Arrays.toString(quality)+
-							"\n"+Arrays.toString(bases)+"\n"+numericID+"\n"+id+"\n"+FASTQ.ASCII_OFFSET);
-				}
-				return false;
-			}
+//		if(false){//This causes problems with error-corrected PacBio reads.
+//			boolean x=(quality==null || quality.length<1 || quality[0]<=80 || !FASTQ.DETECT_QUALITY || FASTQ.IGNORE_BAD_QUALITY);
+//			if(!x){
+//				if(processAssertions){
+//					KillSwitch.kill("Quality value ("+quality[0]+") appears too high.\n"+Arrays.toString(quality)+
+//							"\n"+Arrays.toString(bases)+"\n"+numericID+"\n"+id+"\n"+FASTQ.ASCII_OFFSET);
+//				}
+//				return false;
+//			}
+//		}
+		
+		if(bases==null){
+			quality=null; //I could require this to be true
+			if(FIX_HEADER){fixHeader(processAssertions);}
+			setValidated(true);
+			return true;
 		}
 		
-		final boolean aa=aminoacid();
+		validateQualityLength(processAssertions);
 		
-		if(NULLIFY_BROKEN_QUALITY && quality!=null && quality.length!=bases.length){
-			quality=null;
-			setDiscarded(true);
-		}
+		final boolean passesJunk;
 		
-		assert(!processAssertions || quality==null || quality.length==bases.length) : 
-			"\nMismatch between length of bases and qualities for read "+numericID+" (id="+id+").\n"+
-			"# qualities="+quality.length+", # bases="+bases.length+"\n\n"+
-			FASTQ.qualToString(quality)+"\n"+new String(bases)+"\n";
-		if(quality!=null && (bases==null || bases.length!=quality.length)){
-			assert(!processAssertions) : 
-				"\nMismatch between length of bases and qualities for read "+numericID+" (id="+id+").\n"+
-				"# qualities="+quality.length+", # bases="+bases.length+"\n\n"+
-				FASTQ.qualToString(quality)+"\n"+new String(bases)+"\n";
-			return false;
-		}
-		
-		if(bases!=null && (true || (FLAG_JUNK || FIX_JUNK || U_TO_T))){
-			if(aa){
-				for(int i=0; i<bases.length; i++){
-					byte b=bases[i];
-					int num=AminoAcid.aminoToCode[b];
-					if(num<0){
-						if(FIX_JUNK){
-							bases[i]='X';
-							if(quality!=null){quality[i]=0;}
-						}else{
-							setJunk(true);
-							break;
-						}
-					}
-				}
+//		assert(false) : SKIP_SLOW_VALIDATION+","+VALIDATE_BRANCHLESS+","+JUNK_MODE;
+		if(SKIP_SLOW_VALIDATION){
+			passesJunk=true;
+		}else if(!aminoacid()){
+			if(U_TO_T){uToT();}
+			if(VALIDATE_BRANCHLESS){
+				passesJunk=validateCommonCase_branchless(processAssertions);
 			}else{
-				if(U_TO_T){
-					for(int i=0; i<bases.length; i++){
-						if(Character.toUpperCase(bases[i])=='U'){
-							bases[i]=AminoAcid.uToT[bases[i]];
-						}
-					}
-				}
-				for(int i=0; i<bases.length; i++){
-					byte b=bases[i];
-					int num=AminoAcid.baseToNumberExtended[b];
-					if(num<0){
-						if(FIX_JUNK){bases[i]='N';}
-						else{
-							setJunk(true);
-							break;
-						}
-					}
-				}
+				passesJunk=validateCommonCase(processAssertions);
 			}
 		}else{
-			boolean x=(bases==null || bases.length<2 || bases[1]=='N' || bases[1]=='.' || bases[1]=='-' || 
-					Character.isLetter(bases[1]) || (aa && bases[1]=='*'));
-			if(!x){
-				assert(!processAssertions) : "\nAn input file appears to be misformatted.  The character with ASCII code "+bases[1]+
-					" appeared where a base was expected.\n\n"+Tools.toStringSafe(bases);
-				return false;
-			}
-		}
-
-		if(bases!=null){
-			final byte nocall=(aa ? (byte)'.' : (byte)'N');
-			if(quality!=null){
-				if(!aa){
-
-					if(CHANGE_QUALITY){
-						for(int i=0; i<quality.length; i++){
-							byte b=bases[i];
-							byte q=quality[i];
-							if(AminoAcid.isFullyDefined(b)){
-								if(q<MIN_CALLED_QUALITY){
-									quality[i]=MIN_CALLED_QUALITY;
-								}else if(q>MAX_CALLED_QUALITY){
-									quality[i]=MAX_CALLED_QUALITY;
-								}
-							}else{
-								quality[i]=0;
-								if(b=='-' || b=='.' || b=='X' || b=='n'){bases[i]=nocall;}
-							}
-							if(TO_UPPER_CASE && b>90){bases[i]-=32;}
-							else if(LOWER_CASE_TO_N && b>90){bases[i]=nocall;}
-						}
-					}else{
-						for(int i=0; i<bases.length; i++){
-							byte b=bases[i];
-							if(AminoAcid.isFullyDefined(b)){
-								//do nothing
-							}else{
-								if(b=='-' || b=='.' || b=='X' || b=='n'){bases[i]=nocall;}
-							}
-							if(TO_UPPER_CASE && b>90){bases[i]-=32;}
-							else if(LOWER_CASE_TO_N && b>90){bases[i]=nocall;}
-						}
-					}
-				}
-			}else if(TO_UPPER_CASE){
-				for(int i=0; i<bases.length; i++){
-					byte b=bases[i];
-					if(b>90){
-						//							assert(Character.isLowerCase(bases[i])) : new String(bases);
-						bases[i]-=32;
-						//							assert(Character.isUpperCase(bases[i])) : new String(bases);
-					}
-					if(OTHER_SYMBOLS_TO_N && (b=='-' || b=='.' || b=='X') && !aa){bases[i]=nocall;}
-				}
-			}else if(LOWER_CASE_TO_N){
-				for(int i=0; i<bases.length; i++){
-					byte b=bases[i];
-					if(b>90){bases[i]=nocall;}
-					else if(b=='-' || b=='.' || b=='X'){bases[i]=nocall;}
-				}
-			}else if(OTHER_SYMBOLS_TO_N && !aminoacid()){
-				for(int i=0; i<bases.length; i++){
-					byte b=bases[i];
-					if(b=='-' || b=='.' || b=='X'){bases[i]=nocall;}
-				}
-			}
+//			if(U_TO_T){uToT();}  This is amino, so...
+			fixCase();
+			passesJunk=validateJunk(processAssertions);
+			if(CHANGE_QUALITY){fixQuality();}
 		}
 		
-		if(FIX_HEADER){
-			fixHeader();
-		}
+		if(FIX_HEADER){fixHeader(processAssertions);}
 		
 		setValidated(true);
 		
 		return true;
 	}
 	
+
+	
+	public boolean checkQuality(){
+		if(quality==null){return true;}
+		for(int i=0; quality!=null && i<bases.length; i++){
+			if((bases[i]=='N')!=(quality[i]<1)){
+				assert(false) : (char)bases[i]+", "+quality[i]+", "+i+", "+CHANGE_QUALITY+", "+MIN_CALLED_QUALITY+"\n"+toFastq();
+				return false;
+			}
+		}
+		return true;
+	}
+	
+	private void uToT(){
+		if(bases==null){return;}
+		for(int i=0; i<bases.length; i++){
+			bases[i]=AminoAcid.uToT[bases[i]];
+		}
+	}
+	
+	private void tToU(){
+		if(bases==null){return;}
+		for(int i=0; i<bases.length; i++){
+			bases[i]=AminoAcid.tToU[bases[i]];
+		}
+	}
+	
+	private boolean validateJunk(boolean processAssertions){
+		assert(bases!=null);
+		if(JUNK_MODE==IGNORE_JUNK){return true;}
+		final byte nocall;
+		final byte[] toNum;
+		final boolean aa=aminoacid();
+		if(aa){
+			nocall='X';
+			toNum=AminoAcid.acidToNumberExtended;
+		}else{
+			nocall='N';
+			toNum=AminoAcid.baseToNumberExtended;
+		}
+		for(int i=0; i<bases.length; i++){
+			byte b=bases[i];
+			int num=toNum[b];
+//			System.err.println(Character.toString(b)+" -> "+num);
+			if(num<0){
+				if(JUNK_MODE==FIX_JUNK){
+					bases[i]=nocall;
+				}else if(JUNK_MODE==FLAG_JUNK){
+					setJunk(true);
+					return false;
+				}else{
+					if(processAssertions){
+						KillSwitch.kill("\nAn input file appears to be misformatted:\n"
+							+ "The character with ASCII code "+b+" appeared where "+(aa ? "an amino acid" : "a base")+" was expected"
+									+ (b>31 && b<127 ? ": '"+Character.toString((char)b)+"'\n" : ".\n")
+							+ "Sequence #"+numericID+"\n"
+							+ "Sequence ID '"+id+"'\n"
+							+ "Sequence: "+Tools.toStringSafe(bases)+"\n"
+							+ "Flags: "+Long.toBinaryString(flags)+"\n\n"
+							+ "This can be bypassed with the flag 'tossjunk', 'fixjunk', or 'ignorejunk'");
+					}
+					setJunk(true);
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+	
+	private void validateQualityLength(boolean processAssertions){
+		if(quality==null || quality.length==bases.length){return;}
+		if(TOSS_BROKEN_QUALITY){
+			quality=null;
+			setDiscarded(true);
+			setJunk(true);
+		}else if(NULLIFY_BROKEN_QUALITY){
+			quality=null;
+			setJunk(true);
+		}else if(FLAG_BROKEN_QUALITY){
+			setJunk(true);
+		}else{
+			boolean x=false;
+			assert(x=processAssertions);
+			if(x){
+				KillSwitch.kill("\nMismatch between length of bases and qualities for read "+numericID+" (id="+id+").\n"+
+						"# qualities="+quality.length+", # bases="+bases.length+"\n\n"+
+						FASTQ.qualToString(quality)+"\n"+new String(bases)+"\n\n"
+						+ "This can be bypassed with the flag 'tossbrokenreads' or 'nullifybrokenquality'");
+			}
+		}
+	}
+	
+	private void fixQuality(){
+		if(quality==null || !CHANGE_QUALITY){return;}
+
+		final byte[] toNumber=aminoacid() ? AminoAcid.acidToNumber : AminoAcid.baseToNumber;
+		
+		for(int i=0; i<quality.length; i++){
+			byte b=bases[i];
+			byte q=quality[i];
+			quality[i]=capQuality(q, b);
+//			if(toNumber[b]>=0){
+//				if(q<MIN_CALLED_QUALITY){
+//					quality[i]=MIN_CALLED_QUALITY;
+//				}else if(q>MAX_CALLED_QUALITY){
+//					quality[i]=MAX_CALLED_QUALITY;
+//				}
+//			}else{
+//				quality[i]=0;
+//			}
+		}
+	}
+	
+	private void fixCase(){
+		if(bases==null || (!DOT_DASH_X_TO_N && !TO_UPPER_CASE && !LOWER_CASE_TO_N)){return;}
+		final boolean aa=aminoacid();
+		
+		final byte[] caseMap, ddxMap;
+		if(!aa){
+			caseMap=TO_UPPER_CASE ? AminoAcid.toUpperCase : LOWER_CASE_TO_N ? AminoAcid.lowerCaseToNocall : null;
+			ddxMap=DOT_DASH_X_TO_N ? AminoAcid.dotDashXToNocall : null;
+		}else{
+			caseMap=TO_UPPER_CASE ? AminoAcid.toUpperCase : LOWER_CASE_TO_N ? AminoAcid.lowerCaseToNocallAA : null;
+			ddxMap=DOT_DASH_X_TO_N ? AminoAcid.dotDashXToNocallAA : null;
+		}
+		
+//		assert(false) : (AminoAcid.toUpperCase==caseMap)+", "+ddxMap;
+		
+		if(DOT_DASH_X_TO_N){
+			if(TO_UPPER_CASE || LOWER_CASE_TO_N){
+				for(int i=0; i<bases.length; i++){
+					byte b=bases[i];
+					bases[i]=caseMap[ddxMap[b]];
+				}
+			}else{
+				for(int i=0; i<bases.length; i++){
+					byte b=bases[i];
+					bases[i]=ddxMap[b];
+				}
+			}
+		}else{
+			if(TO_UPPER_CASE || LOWER_CASE_TO_N){
+				for(int i=0; i<bases.length; i++){
+					byte b=bases[i];
+					bases[i]=caseMap[b];
+				}
+			}else{
+				assert(false);
+			}
+		}
+	}
+	
+	private boolean validateCommonCase_branchless(boolean processAssertions){
+		
+		assert(!aminoacid());
+		assert(bases!=null);
+		
+		if(TO_UPPER_CASE || LOWER_CASE_TO_N){fixCase();}
+		
+		final byte nocall='N';
+		final byte[] toNum=AminoAcid.baseToNumber;
+		final byte[] map=(DOT_DASH_X_TO_N && IUPAC_TO_N ? AminoAcid.baseToACGTN : 
+			DOT_DASH_X_TO_N ? AminoAcid.dotDashXToNocall : IUPAC_TO_N ? AminoAcid.iupacToNocall : null);
+		
+		if(JUNK_MODE==IGNORE_JUNK){
+			if(quality!=null && CHANGE_QUALITY){
+				if(DOT_DASH_X_TO_N || IUPAC_TO_N){
+					for(int i=0; i<bases.length; i++){
+						final byte b=map[bases[i]];
+						final byte q=quality[i];
+						final int num=toNum[b];
+						bases[i]=b;
+						quality[i]=(num>=0 ? qMap[q] : 0);
+					}
+				}else{
+					for(int i=0; i<bases.length; i++){
+						final byte b=bases[i];
+						final byte q=quality[i];
+						final int num=toNum[b];
+						quality[i]=(num>=0 ? qMap[q] : 0);
+					}
+				}
+			}else if(DOT_DASH_X_TO_N || IUPAC_TO_N){
+				for(int i=0; i<bases.length; i++){
+					byte b=map[bases[i]];
+					bases[i]=b;
+				}
+			}
+			return true;
+		}
+		
+		int junkOr=0;
+//		int iupacOr=0;
+		final byte[] toNumE=AminoAcid.baseToNumberExtended;
+		
+//		asdf
+		
+		if(DOT_DASH_X_TO_N || IUPAC_TO_N){
+			if(quality!=null && CHANGE_QUALITY){
+				for(int i=0; i<bases.length; i++){
+					final byte b=map[bases[i]];
+					final byte q=quality[i];
+					final int numE=toNumE[b];
+					final int num=toNum[b];
+					junkOr|=numE;
+//					iupacOr|=num;
+					bases[i]=b;
+					quality[i]=(num>=0 ? qMap[q] : 0);
+				}
+			}else{
+				for(int i=0; i<bases.length; i++){
+					final byte b=map[bases[i]];
+					final int numE=toNumE[b];
+//					final int num=toNum[b];
+					junkOr|=numE;
+//					iupacOr|=num;
+					bases[i]=b;
+				}
+			}
+		}else{
+			if(quality!=null && CHANGE_QUALITY){
+				for(int i=0; i<bases.length; i++){
+					final byte b=bases[i];
+					final byte q=quality[i];
+					final int numE=toNumE[b];
+					final int num=toNum[b];
+					junkOr|=numE;
+//					iupacOr|=num;
+					quality[i]=(num>=0 ? qMap[q] : 0);
+				}
+			}else{
+				for(int i=0; i<bases.length; i++){
+					final byte b=bases[i];
+					final int numE=toNumE[b];
+//					final int num=toNum[b];
+					junkOr|=numE;
+//					iupacOr|=num;
+				}
+			}
+		}
+		
+//		System.err.println(junkOr+", "+JUNK_MODE);
+		
+		//Common case
+		if(junkOr>=0){return true;}
+//		if(junkOr>=0 && (JUNK_MODE!=FIX_JUNK_AND_IUPAC || iupacOr>=0)){return true;}
+//		
+//		assert(junkOr<0 || (JUNK_MODE==FIX_JUNK_AND_IUPAC && iupacOr<0));
+		
+		//TODO: I could disable VALIDATE_BRANCHLESS here, if it's not final
+		//VALIDATE_BRANCHLESS=false;
+		if(JUNK_MODE==FIX_JUNK){
+			for(int i=0; i<bases.length; i++){
+				byte b=bases[i];
+				final int numE=toNumE[b];
+
+				if(numE<0){
+					bases[i]=nocall;
+					if(quality!=null){quality[i]=0;}
+				}
+			}
+			return true;
+		}else if(JUNK_MODE==FLAG_JUNK){
+			setJunk(true);
+			return false;
+		}else if(JUNK_MODE==FIX_JUNK_AND_IUPAC){
+			for(int i=0; i<bases.length; i++){
+				byte b=bases[i];
+				final byte c=AminoAcid.baseToACGTN[b];
+				bases[i]=c;
+			}
+			return true;
+		}else{
+			if(processAssertions){
+				int i=0;
+				for(; i<bases.length; i++){
+					if(toNumE[bases[i]]<0){break;}
+				}
+				byte b=bases[i];
+				KillSwitch.kill("\nAn input file appears to be misformatted:\n"
+						+ "The character with ASCII code "+b+" appeared where a base was expected"
+							+ (b>31 && b<127 ? ": '"+Character.toString((char)b)+"'\n" : ".\n")
+						+ "Sequence #"+numericID+"\n"
+						+ "Sequence ID: '"+id+"'\n"
+						+ "Sequence: '"+Tools.toStringSafe(bases)+"'\n\n"
+						+ "This can be bypassed with the flag 'tossjunk', 'fixjunk', or 'ignorejunk'");
+			}
+			setJunk(true);
+			return false;
+		}
+	}
+	
+	private boolean validateCommonCase(boolean processAssertions){
+		
+		assert(!aminoacid());
+		assert(bases!=null);
+		
+		if(TO_UPPER_CASE || LOWER_CASE_TO_N){fixCase();}
+		
+		final byte nocall='N';
+		final byte[] toNum=AminoAcid.baseToNumber;
+		final byte[] ddxMap=AminoAcid.dotDashXToNocall;
+		
+		if(JUNK_MODE==IGNORE_JUNK){
+			if(quality!=null && CHANGE_QUALITY){
+				if(DOT_DASH_X_TO_N){
+					for(int i=0; i<bases.length; i++){
+						final byte b=ddxMap[bases[i]];
+						final byte q=quality[i];
+						final int num=toNum[b];
+						bases[i]=b;
+						quality[i]=(num>=0 ? qMap[q] : 0);
+					}
+				}else{
+					for(int i=0; i<bases.length; i++){
+						final byte b=bases[i];
+						final byte q=quality[i];
+						final int num=toNum[b];
+						quality[i]=(num>=0 ? qMap[q] : 0);
+					}
+				}
+			}else if(DOT_DASH_X_TO_N){
+				for(int i=0; i<bases.length; i++){
+					byte b=ddxMap[bases[i]];
+					bases[i]=b;
+				}
+			}
+		}else if(DOT_DASH_X_TO_N){
+			final byte[] toNumE=AminoAcid.baseToNumberExtended;
+			if(quality!=null && CHANGE_QUALITY){
+				for(int i=0; i<bases.length; i++){
+					byte b=ddxMap[bases[i]];
+					final byte q=quality[i];
+					final int numE=toNumE[b];
+
+					if(numE<0){
+						if(JUNK_MODE==FIX_JUNK){
+							b=nocall;
+						}else if(JUNK_MODE==FLAG_JUNK){
+							setJunk(true);
+							return false;
+						}else{
+							if(processAssertions){
+								KillSwitch.kill("\nAn input file appears to be misformatted:\n"
+										+ "The character with ASCII code "+bases[1]+" appeared where a base was expected.\n"
+										+ "Sequence #"+numericID+"\n"
+										+ "Sequence ID '"+id+"'\n"
+										+ "Sequence: "+Tools.toStringSafe(bases)+"\n\n"
+										+ "This can be bypassed with the flag 'tossjunk', 'fixjunk', or 'ignorejunk'");
+							}
+							setJunk(true);
+							return false;
+						}
+					}
+
+					final int num=toNum[b];
+					bases[i]=b;
+					quality[i]=(num>=0 ? qMap[q] : 0);
+				}
+			}else{
+				for(int i=0; i<bases.length; i++){
+					byte b=ddxMap[bases[i]];
+					final int numE=toNumE[b];
+
+					if(numE<0){
+						if(JUNK_MODE==FIX_JUNK){
+							b=nocall;
+						}else if(JUNK_MODE==FLAG_JUNK){
+							setJunk(true);
+							return false;
+						}else{
+							if(processAssertions){
+								KillSwitch.kill("\nAn input file appears to be misformatted:\n"
+										+ "The character with ASCII code "+bases[1]+" appeared where a base was expected.\n"
+										+ "Sequence #"+numericID+"\n"
+										+ "Sequence ID '"+id+"'\n"
+										+ "Sequence: "+Tools.toStringSafe(bases)+"\n\n"
+										+ "This can be bypassed with the flag 'tossjunk', 'fixjunk', or 'ignorejunk'");
+							}
+							setJunk(true);
+							return false;
+						}
+					}
+
+					bases[i]=b;
+				}
+			}
+		}else{
+			final byte[] toNumE=AminoAcid.baseToNumberExtended;
+			if(quality!=null && CHANGE_QUALITY){
+				for(int i=0; i<bases.length; i++){
+					byte b=bases[i];
+					final byte q=quality[i];
+					final int numE=toNumE[b];
+
+					if(numE<0){
+						if(JUNK_MODE==FIX_JUNK){
+							bases[i]=b=nocall;
+						}else if(JUNK_MODE==FLAG_JUNK){
+							setJunk(true);
+							return false;
+						}else{
+							if(processAssertions){
+								KillSwitch.kill("\nAn input file appears to be misformatted:\n"
+										+ "The character with ASCII code "+bases[1]+" appeared where a base was expected.\n"
+										+ "Sequence #"+numericID+"\n"
+										+ "Sequence ID '"+id+"'\n"
+										+ "Sequence: "+Tools.toStringSafe(bases)+"\n\n"
+										+ "This can be bypassed with the flag 'tossjunk', 'fixjunk', or 'ignorejunk'");
+							}
+							setJunk(true);
+							return false;
+						}
+					}
+
+					final int num=toNum[b];
+					bases[i]=b;
+					quality[i]=(num>=0 ? qMap[q] : 0);
+				}
+			}else{
+				for(int i=0; i<bases.length; i++){
+					byte b=bases[i];
+					final int numE=toNumE[b];
+
+					if(numE<0){
+						if(JUNK_MODE==FIX_JUNK){
+							bases[i]=b=nocall;
+						}else if(JUNK_MODE==FLAG_JUNK){
+							setJunk(true);
+							return false;
+						}else{
+							if(processAssertions){
+								KillSwitch.kill("\nAn input file appears to be misformatted:\n"
+										+ "The character with ASCII code "+bases[1]+" appeared where a base was expected.\n"
+										+ "Sequence #"+numericID+"\n"
+										+ "Sequence ID '"+id+"'\n"
+										+ "Sequence: "+Tools.toStringSafe(bases)+"\n\n"
+										+ "This can be bypassed with the flag 'tossjunk', 'fixjunk', or 'ignorejunk'");
+							}
+							setJunk(true);
+							return false;
+						}
+					}
+				}
+			}
+		}
+		return true;
+	}
+	
+	private final void fixHeader(boolean processAssertions){
+		id=Tools.fixHeader(id, ALLOW_NULL_HEADER, processAssertions);
+	}
+	
+	/*--------------------------------------------------------------*/
+	/*----------------           Various            ----------------*/
+	/*--------------------------------------------------------------*/
+	
+	
 	private static final int absdif(int a, int b){
 		return a>b ? a-b : b-a;
 	}
 	
-	public final void fixHeader(){
-		id=Tools.fixHeader(id);
-	}
-	
 	/** Returns true if these reads are identical, allowing at most n no-calls and m mismatches of max quality q*/
 	public boolean isDuplicateByBases(Read r, int nmax, int mmax, byte qmax, boolean banSameQualityMismatch){
-		return isDuplicateByBases(r, nmax, mmax, qmax, false, false);
+		return isDuplicateByBases(r, nmax, mmax, qmax, banSameQualityMismatch, false);
 	}
 	
 	
@@ -280,7 +640,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		if(bothEnds){
 			if(start!=r.start || stop!=r.stop){return false;}
 		}else{
-			if(strand()==Gene.PLUS){
+			if(strand()==Shared.PLUS){
 				if(start!=r.start){return false;}
 			}else{
 				if(stop!=r.stop){return false;}
@@ -319,7 +679,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		
 		if(chrom!=r.chrom || strand()!=r.strand()){return false;}
 
-		if(strand()==Gene.PLUS){
+		if(strand()==Shared.PLUS){
 			if(start!=r.start){return false;}
 		}else{
 			if(stop!=r.stop){return false;}
@@ -363,8 +723,8 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 			stop=Tools.max(stop, r.stop);
 			mapScore=Tools.max(mapScore, r.mapScore);
 			
-			bases=Arrays.copyOfRange(bases, 0, r.length());
-			quality=Arrays.copyOfRange(quality, 0, r.quality.length);
+			bases=KillSwitch.copyOfRange(bases, 0, r.length());
+			quality=KillSwitch.copyOfRange(quality, 0, r.quality.length);
 			for(int i=oldLenB; i<bases.length; i++){
 				bases[i]='N';
 				quality[i]=0;
@@ -482,29 +842,12 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		assert(mate==null || numericID==mate.numericID);
 	}
 	
+	@Override
 	public String toString(){return toText(false).toString();}
 	
-	public StringBuilder toSites(){
-		StringBuilder sb;
-		if(numSites()==0){
-			sb=new StringBuilder(2);
-			sb.append('.');
-		}else{
-			sb=new StringBuilder(sites.size()*20);
-			int appended=0;
-			for(SiteScore ss : sites){
-				if(appended>0){sb.append('\t');}
-				if(ss!=null){
-					sb.append(ss.toText());
-					appended++;
-				}
-			}
-			if(appended==0){sb.append('.');}
-		}
-		return sb;
-	}
+	public ByteBuilder toSites(){return toSites((ByteBuilder)null);}
 	
-	public ByteBuilder toSitesB(ByteBuilder sb){
+	public ByteBuilder toSites(ByteBuilder sb){
 		if(numSites()==0){
 			if(sb==null){sb=new ByteBuilder(2);}
 			sb.append('.');
@@ -523,89 +866,62 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		return sb;
 	}
 	
-	public StringBuilder toInfo(){
-		if(obj==null){return new StringBuilder();}
-		if(obj.getClass()==StringBuilder.class){return (StringBuilder)obj;}
-		return new StringBuilder(obj.toString());
-	}
-	
-	public ByteBuilder toInfoB(){
+	public ByteBuilder toInfo(){
 		if(obj==null){return new ByteBuilder();}
 		if(obj.getClass()==ByteBuilder.class){return (ByteBuilder)obj;}
 		return new ByteBuilder(obj.toString());
 	}
 	
-	public ByteBuilder toInfoB(ByteBuilder bb){
+	public ByteBuilder toInfo(ByteBuilder bb){
 		if(obj==null){return bb;}
 		if(obj.getClass()==ByteBuilder.class){return bb.append((ByteBuilder)obj);}
-		return bb.append(obj);
+		return bb.append(obj.toString());
 	}
 	
-	public StringBuilder toFastq(){
-		return FASTQ.toFASTQ(this, (StringBuilder)null);
+	public ByteBuilder toFastq(){
+		return FASTQ.toFASTQ(this, (ByteBuilder)null);
 	}
 	
 	public ByteBuilder toFastq(ByteBuilder bb){
 		return FASTQ.toFASTQ(this, bb);
 	}
-
-	public StringBuilder toFasta(){return toFasta(Shared.FASTA_WRAP);}
+	
+	public ByteBuilder toFasta(){return toFasta(Shared.FASTA_WRAP);}
 	public ByteBuilder toFasta(ByteBuilder bb){return toFasta(Shared.FASTA_WRAP, bb);}
 	
-	public StringBuilder toFasta(int wrap){
-		if(wrap<1){wrap=Integer.MAX_VALUE;}
-		int len=(id==null ? Tools.stringLength(numericID) : id.length())+(bases==null ? 0 : bases.length+bases.length/wrap)+5;
-		StringBuilder sb=new StringBuilder(len);
-		sb.append('>');
-		if(id==null || FASTQ.TAG_CUSTOM){
-			sb.append(FASTQ.TAG_CUSTOM ? FASTQ.customID(this) : ""+numericID);
-		}else{sb.append(id);}
-		sb.append('\n');
-		if(bases!=null){
-			final char[] buffer=Shared.getTLCB(Tools.min(wrap, bases.length));
-			int j=0;
-			for(int i=0; i<bases.length; i++, j++){
-				if(j==wrap){
-					sb.append(buffer, 0, j);
-					sb.append('\n');
-					j=0;
-				}
-				buffer[j]=(char)bases[i];
-			}
-			if(j>0){sb.append(buffer, 0, j);}
-		}
-		return sb;
+	public ByteBuilder toFasta(int wrap){
+		return toFasta(wrap, (ByteBuilder)null);
 	}
 	
-	public ByteBuilder toFasta(int wrap, ByteBuilder sb){
+	public ByteBuilder toFasta(int wrap, ByteBuilder bb){
 		if(wrap<1){wrap=Integer.MAX_VALUE;}
 		int len=(id==null ? Tools.stringLength(numericID) : id.length())+(bases==null ? 0 : bases.length+bases.length/wrap)+5;
-		if(sb==null){sb=new ByteBuilder(len+1);}
-		sb.append('>');
-		if(id==null){sb.append(numericID);}
-		else{sb.append(id);}
+		if(bb==null){bb=new ByteBuilder(len+1);}
+		bb.append('>');
+		if(id==null){bb.append(numericID);}
+		else{bb.append(id);}
 		if(bases!=null){
 			int pos=0;
 			while(pos<bases.length-wrap){
-				sb.append('\n');
-				sb.append(bases, pos, wrap);
+				bb.append('\n');
+				bb.append(bases, pos, wrap);
 				pos+=wrap;
 			}
 			if(pos<bases.length){
-				sb.append('\n');
-				sb.append(bases, pos, bases.length-pos);
+				bb.append('\n');
+				bb.append(bases, pos, bases.length-pos);
 			}
 		}
-		return sb;
+		return bb;
 	}
 	
-	public StringBuilder toSam(){
-		return new SamLine(this, pairnum()).toText();
+	public ByteBuilder toSam(){
+		return toSam((ByteBuilder)null);
 	}
 	
 	public ByteBuilder toSam(ByteBuilder bb){
 		SamLine sl=new SamLine(this, pairnum());
-		return sl.toBytes(bb).append('\n');
+		return sl.toBytes(bb);//Note: This used to have a newline
 	}
 	
 	public static CharSequence header(){
@@ -656,117 +972,8 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		return sb;
 	}
 	
-	public StringBuilder toText(boolean okToCompressMatch){
-		
-		final byte[] oldmatch=match;
-		final boolean oldshortmatch=this.shortmatch();
-		if(COMPRESS_MATCH_BEFORE_WRITING && !shortmatch() && okToCompressMatch){
-			match=toShortMatchString(match);
-			setShortMatch(true);
-		}
-		
-		StringBuilder sb=new StringBuilder();
-		sb.append(id);
-		sb.append('\t');
-		sb.append(numericID);
-		sb.append('\t');
-		sb.append(chrom);
-		sb.append('\t');
-		sb.append(Gene.strandCodes[strand()]);
-		sb.append('\t');
-		sb.append(start);
-		sb.append('\t');
-		sb.append(stop);
-		sb.append('\t');
-		
-		for(int i=maskArray.length-1; i>=0; i--){
-			sb.append(flagToNumber(maskArray[i]));
-		}
-		sb.append('\t');
-		
-		sb.append(copies);
-		sb.append('\t');
-
-		sb.append(errors);
-		sb.append('\t');
-		sb.append(mapScore);
-		sb.append('\t');
-		
-		if(bases==null){sb.append('.');}
-		else{
-			for(int i=0; i<bases.length; i++){
-				byte b=bases[i];
-				if(b<4){
-					assert(b>=0);
-					b=(byte) (b+'0');
-				}
-				sb.append((char)b);
-			}
-		}
-		sb.append('\t');
-		
-		int qualSum=0;
-		int qualMin=99999;
-		
-		if(quality==null){
-			sb.append('.');
-		}else{
-			for(int i=0; i<quality.length; i++){
-				byte q=quality[i];
-				qualSum+=q;
-				qualMin=Tools.min(q, qualMin);
-				q=(byte) (q+ASCII_OFFSET);
-				sb.append((char)q);
-			}
-		}
-		sb.append('\t');
-		
-		if(insert<1){sb.append('.');}else{sb.append(insert);};
-		sb.append('\t');
-		
-		if(quality==null){
-			sb.append('.');
-			sb.append('\t');
-		}else{
-			//These are not really necessary...
-			sb.append(qualSum/quality.length);
-			sb.append('\t');
-		}
-		
-		if(match==null){sb.append('.');}
-		else{for(byte b : match){sb.append((char)b);}}
-		sb.append('\t');
-		
-		if(gaps==null){
-			sb.append('.');
-		}else{
-			for(int i=0; i<gaps.length; i++){
-				if(i>0){sb.append('~');}
-				sb.append(gaps[i]);
-			}
-		}
-		
-		if(sites!=null && sites.size()>0){
-			
-			assert(absdif(start, stop)<3000 || (gaps==null) == (sites.get(0).gaps==null)) : 
-				"\n"+this.numericID+"\n"+Arrays.toString(gaps)+"\n"+sites.toString()+"\n";
-			
-			for(SiteScore ss : sites){
-				sb.append('\t');
-				sb.append(ss==null ? "null" : ss.toText());
-			}
-		}
-		
-		if(originalSite!=null){
-			sb.append('\t');
-			sb.append('*');
-			sb.append(originalSite.toText());
-		}
-		
-		match=oldmatch;
-		setShortMatch(oldshortmatch);
-		
-		return sb;
+	public ByteBuilder toText(boolean okToCompressMatch){
+		return toText(okToCompressMatch, (ByteBuilder)null);
 	}
 	
 	public ByteBuilder toText(boolean okToCompressMatch, ByteBuilder bb){
@@ -780,34 +987,34 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		
 		if(bb==null){bb=new ByteBuilder();}
 		bb.append(id);
-		bb.append('\t');
+		bb.tab();
 		bb.append(numericID);
-		bb.append('\t');
+		bb.tab();
 		bb.append(chrom);
-		bb.append('\t');
-		bb.append(Gene.strandCodes2[strand()]);
-		bb.append('\t');
+		bb.tab();
+		bb.append(Shared.strandCodes2[strand()]);
+		bb.tab();
 		bb.append(start);
-		bb.append('\t');
+		bb.tab();
 		bb.append(stop);
-		bb.append('\t');
+		bb.tab();
 		
 		for(int i=maskArray.length-1; i>=0; i--){
 			bb.append(flagToNumber(maskArray[i]));
 		}
-		bb.append('\t');
+		bb.tab();
 		
 		bb.append(copies);
-		bb.append('\t');
+		bb.tab();
 
 		bb.append(errors);
-		bb.append('\t');
+		bb.tab();
 		bb.append(mapScore);
-		bb.append('\t');
+		bb.tab();
 		
 		if(bases==null){bb.append('.');}
 		else{bb.append(bases);}
-		bb.append('\t');
+		bb.tab();
 		
 //		int qualSum=0;
 //		int qualMin=99999;
@@ -824,14 +1031,14 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 			}
 			bb.length+=quality.length;
 		}
-		bb.append('\t');
+		bb.tab();
 		
 		if(insert<1){bb.append('.');}else{bb.append(insert);};
-		bb.append('\t');
+		bb.tab();
 		
 		if(true || quality==null){
 			bb.append('.');
-			bb.append('\t');
+			bb.tab();
 		}else{
 //			//These are not really necessary...
 //			sb.append(qualSum/quality.length);
@@ -840,7 +1047,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		
 		if(match==null){bb.append('.');}
 		else{bb.append(match);}
-		bb.append('\t');
+		bb.tab();
 		
 		if(gaps==null){
 			bb.append('.');
@@ -853,11 +1060,11 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		
 		if(sites!=null && sites.size()>0){
 			
-			assert(absdif(start, stop)<3000 || (gaps==null) == (sites.get(0).gaps==null)) : 
+			assert(absdif(start, stop)<3000 || (gaps==null) == (sites.get(0).gaps==null)) :
 				"\n"+this.numericID+"\n"+Arrays.toString(gaps)+"\n"+sites.toString()+"\n";
 			
 			for(SiteScore ss : sites){
-				bb.append('\t');
+				bb.tab();
 				if(ss==null){
 					bb.append((byte[])null);
 				}else{
@@ -868,7 +1075,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		}
 		
 		if(originalSite!=null){
-			bb.append('\t');
+			bb.tab();
 			bb.append('*');
 			originalSite.toBytes(bb);
 		}
@@ -951,7 +1158,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		
 //		assert(false) : split[16];
 		
-		Read r=new Read(basesOriginal, chrom, start, stop, id, qualityOriginal, numericID, flags);
+		Read r=new Read(basesOriginal, qualityOriginal, id, numericID, flags, chrom, start, stop);
 		r.match=match;
 		r.errors=errors;
 		r.mapScore=mapScore;
@@ -977,11 +1184,10 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		}
 		
 		if(DECOMPRESS_MATCH_ON_LOAD && r.shortmatch()){
-			r.match=toLongMatchString(match);
-			r.setShortMatch(false);
+			r.toLongMatchString(true);
 		}
 
-		assert(r.numSites()==0 || absdif(r.start, r.stop)<3000 || (r.gaps==null) == (r.topSite().gaps==null)) : 
+		assert(r.numSites()==0 || absdif(r.start, r.stop)<3000 || (r.gaps==null) == (r.topSite().gaps==null)) :
 			"\n"+r.numericID+", "+r.chrom+", "+r.strand()+", "+r.start+", "+r.stop+", "+Arrays.toString(r.gaps)+"\n"+r.sites+"\n"+line+"\n";
 		
 		return r;
@@ -1031,45 +1237,45 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		int lastN=-1, lastBase=-1;
 		int contignum=1;
 		long feature=1;
-		StringBuilder sb=(agp ? new StringBuilder() : null);
+		ByteBuilder bb=(agp ? new ByteBuilder() : null);
 		assert(obj==null);
 		for(int i=0; i<bases.length; i++){
 			final byte b=bases[i];
 			if(b=='N'){
 				if(prev!='N'){
 					final int start=lastN+1, stop=i;
-					byte[] b2=Arrays.copyOfRange(bases, start, stop);
-					byte[] q2=(quality==null ? null : Arrays.copyOfRange(quality, start, stop));
-					Read r=new Read(b2, q2, numericID, id+"_c"+contignum);
+					byte[] b2=KillSwitch.copyOfRange(bases, start, stop);
+					byte[] q2=(quality==null ? null : KillSwitch.copyOfRange(quality, start, stop));
+					Read r=new Read(b2, q2, id+"_c"+contignum, numericID);
 					if(r.length()>=minContig){list.add(r);}
 					contignum++;
 					
-					if(sb!=null){
-						sb.append(id).append('\t');
-						sb.append(start+1).append('\t');
-						sb.append(stop).append('\t');
-						sb.append(feature).append('\t');
+					if(bb!=null){
+						bb.append(id).append('\t');
+						bb.append(start+1).append('\t');
+						bb.append(stop).append('\t');
+						bb.append(feature).append('\t');
 						feature++;
-						sb.append('W').append('\t');
-						sb.append(r.id).append('\t');
-						sb.append(1).append('\t');
-						sb.append(r.length()).append('\t');
-						sb.append("+").append('\n');
+						bb.append('W').append('\t');
+						bb.append(r.id).append('\t');
+						bb.append(1).append('\t');
+						bb.append(r.length()).append('\t');
+						bb.append('+').append('\n');
 					}
 				}
 				lastN=i;
 			}else{
-				if(sb!=null && prev=='N' && lastBase>=0){
-					sb.append(id).append('\t');
-					sb.append(lastBase+2).append('\t');
-					sb.append(i).append('\t');
-					sb.append(feature).append('\t');
+				if(bb!=null && prev=='N' && lastBase>=0){
+					bb.append(id).append('\t');
+					bb.append(lastBase+2).append('\t');
+					bb.append(i).append('\t');
+					bb.append(feature).append('\t');
 					feature++;
-					sb.append('N').append('\t');
-					sb.append((i-lastBase-1)).append('\t');
-					sb.append("scaffold").append('\t');
-					sb.append("yes").append('\t');
-					sb.append("paired-ends").append('\n');
+					bb.append('N').append('\t');
+					bb.append((i-lastBase-1)).append('\t');
+					bb.append("scaffold").append('\t');
+					bb.append("yes").append('\t');
+					bb.append("paired-ends").append('\n');
 				}
 				lastBase=i;
 			}
@@ -1077,57 +1283,53 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		}
 		if(prev!='N'){
 			final int start=lastN+1, stop=bases.length;
-			byte[] b2=Arrays.copyOfRange(bases, start, stop);
-			byte[] q2=(quality==null ? null : Arrays.copyOfRange(quality, start, stop));
-			Read r=new Read(b2, q2, numericID, id+"_c"+contignum);
+			byte[] b2=KillSwitch.copyOfRange(bases, start, stop);
+			byte[] q2=(quality==null ? null : KillSwitch.copyOfRange(quality, start, stop));
+			Read r=new Read(b2, q2, id+"_c"+contignum, numericID);
 			if(r.length()>=minContig){list.add(r);}
 			contignum++;
 			
-			if(sb!=null){
-				sb.append(id).append('\t');
-				sb.append(start+1).append('\t');
-				sb.append(stop).append('\t');
-				sb.append(feature).append('\t');
+			if(bb!=null){
+				bb.append(id).append('\t');
+				bb.append(start+1).append('\t');
+				bb.append(stop).append('\t');
+				bb.append(feature).append('\t');
 				feature++;
-				sb.append('W').append('\t');
-				sb.append(r.id).append('\t');
-				sb.append(1).append('\t');
-				sb.append(r.length()).append('\t');
-				sb.append("+").append('\n');
+				bb.append('W').append('\t');
+				bb.append(r.id).append('\t');
+				bb.append(1).append('\t');
+				bb.append(r.length()).append('\t');
+				bb.append('+').append('\n');
 			}
 		}else{
-			if(sb!=null && prev=='N' && lastBase>=0){
-				sb.append(id).append('\t');
-				sb.append(lastBase+2).append('\t');
-				sb.append(bases.length).append('\t');
-				sb.append(feature).append('\t');
+			if(bb!=null && prev=='N' && lastBase>=0){
+				bb.append(id).append('\t');
+				bb.append(lastBase+2).append('\t');
+				bb.append(bases.length).append('\t');
+				bb.append(feature).append('\t');
 				feature++;
-				sb.append('N').append('\t');
-				sb.append((bases.length-lastBase-1)).append('\t');
-				sb.append("scaffold").append('\t');
-				sb.append("yes").append('\t');
-				sb.append("paired-ends").append('\n');
+				bb.append('N').append('\t');
+				bb.append((bases.length-lastBase-1)).append('\t');
+				bb.append("scaffold").append('\t');
+				bb.append("yes").append('\t');
+				bb.append("paired-ends").append('\n');
 			}
 			lastBase=bases.length;
 		}
-		if(sb!=null){obj=sb.toString();}
+		if(bb!=null){obj=bb.toBytes();}
 		return list;
 	}
-
-//	/** Reverses the read.  Mainly for testing. 
-//	 * Seems to be unused. */
-//	@Deprecated
-//	protected void reverse() {
-//		Tools.reverseInPlace(bases);
-//		Tools.reverseInPlace(quality);
-//		Tools.reverseInPlace(match);
-//	}
 
 	/** Reverse-complements the read. */
 	public void reverseComplement() {
 		AminoAcid.reverseComplementBasesInPlace(bases);
 		Tools.reverseInPlace(quality);
 		setStrand(strand()^1);
+	}
+
+	/** Complements the read. */
+	public void complement() {
+		AminoAcid.reverseComplementBasesInPlace(bases);
 	}
 	
 	@Override
@@ -1318,9 +1520,9 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 			if((strand()==mate.strand())!=sameStrandPairs){return true;}
 		}
 		if(!sameStrandPairs){
-			if(strand()==Gene.PLUS && mate.strand()==Gene.MINUS){
+			if(strand()==Shared.PLUS && mate.strand()==Shared.MINUS){
 				if(start>=mate.stop){return true;}
-			}else if(strand()==Gene.MINUS && mate.strand()==Gene.PLUS){
+			}else if(strand()==Shared.MINUS && mate.strand()==Shared.PLUS){
 				if(mate.start>=stop){return true;}
 			}
 		}
@@ -1338,7 +1540,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 
 	/**
 	 * @param k
-	 * @return
+	 * @return Number of valid kmers
 	 */
 	public int numValidKmers(int k) {
 		if(bases==null){return 0;}
@@ -1352,21 +1554,19 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		return counted;
 	}
 	
-
-	
 	/**
 	 * @param match string
 	 * @return Total number of match, sub, del, ins, or clip symbols
 	 */
 	public static final int[] matchToMsdicn(byte[] match) {
 		if(match==null || match.length<1){return null;}
-		int[] msdicn=new int[6];
+		int[] msdicn=KillSwitch.allocInt1D(6);
 		
 		byte mode='0', c='0';
 		int current=0;
 		for(int i=0; i<match.length; i++){
 			c=match[i];
-			if(Character.isDigit(c)){
+			if(Tools.isDigit(c)){
 				current=(current*10)+(c-'0');
 			}else{
 				if(mode==c){
@@ -1392,7 +1592,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 				}
 			}
 		}
-		if(current>0 || !Character.isDigit(c)){
+		if(current>0 || !Tools.isDigit(c)){
 			current=Tools.max(current, 1);
 			if(mode=='m'){
 				msdicn[0]+=current;
@@ -1424,7 +1624,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		int len=0;
 		for(int i=0; i<match.length; i++){
 			c=match[i];
-			if(Character.isDigit(c)){
+			if(Tools.isDigit(c)){
 				current=(current*10)+(c-'0');
 			}else{
 				if(mode==c){
@@ -1440,8 +1640,14 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 						len+=current;
 					}else if(mode=='I'){ //Do nothing
 						//len+=current;
-					}else if(mode=='C' || mode=='X' || mode=='Y'){
+					}else if(mode=='C'){
 						len+=current;
+					}else if(mode=='X'){ //Not sure about this case, but adding seems fine
+						len+=current;
+//						assert(false) : new String(match);
+					}else if(mode=='Y'){ //Do nothing
+						//len+=current;
+//						assert(false) : new String(match);
 					}else if(mode=='N' || mode=='R'){
 						len+=current;
 					}
@@ -1450,7 +1656,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 				}
 			}
 		}
-		if(current>0 || !Character.isDigit(c)){
+		if(current>0 || !Tools.isDigit(c)){
 			current=Tools.max(current, 1);
 			if(mode=='m'){
 				len+=current;
@@ -1460,8 +1666,14 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 				len+=current;
 			}else if(mode=='I'){ //Do nothing
 				//len+=current;
-			}else if(mode=='C' || mode=='X' || mode=='Y'){
+			}else if(mode=='C'){
 				len+=current;
+			}else if(mode=='X'){ //Not sure about this case, but adding seems fine
+				len+=current;
+				assert(false) : new String(match);
+			}else if(mode=='Y'){ //Do nothing
+				//len+=current;
+//				assert(false) : new String(match);
 			}else if(mode=='N' || mode=='R'){
 				len+=current;
 			}
@@ -1473,9 +1685,9 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	
 	public static final float identity(byte[] match) {
 		if(FLAT_IDENTITY){
-			return identityFlat(match);
+			return identityFlat(match, true);
 		}else{
-			return identitySkewed(match);
+			return identitySkewed(match, true, true, false, false);
 		}
 	}
 	
@@ -1521,12 +1733,51 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		return false;
 	}
 	
+	public int mappedNonClippedBases() {
+		if(!mapped() || match==null || bases==null){return 0;}
+		
+		int len=0;
+		byte mode='0', c='0';
+		int current=0;
+		for(int i=0; i<match.length; i++){
+			c=match[i];
+			if(Tools.isDigit(c)){
+				current=(current*10)+(c-'0');
+			}else{
+				if(mode==c){
+					current=Tools.max(current+1, 2);
+				}else{
+					current=Tools.max(current, 1);
+
+					if(mode=='D' || mode=='C' || mode=='X' || mode=='Y' || mode=='d'){
+						
+					}else{
+						len+=current;
+					}
+					mode=c;
+					current=0;
+				}
+			}
+		}
+		if(current>0 || !Tools.isDigit(c)){
+			current=Tools.max(current, 1);
+			if(mode=='D' || mode=='C' || mode=='X' || mode=='Y' || mode=='d'){
+				
+			}else{
+				len+=current;
+			}
+			mode=c;
+			current=0;
+		}
+		return len;
+	}
+	
 	/**
 	 * Handles short or long mode.
 	 * @param match string
 	 * @return Identity based on number of match, sub, del, ins, or N symbols
 	 */
-	public static final float identityFlat(byte[] match) {
+	public static final float identityFlat(byte[] match, boolean penalizeN) {
 //		assert(false) : new String(match);
 		if(match==null || match.length<1){return 0;}
 		
@@ -1536,7 +1787,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		int current=0;
 		for(int i=0; i<match.length; i++){
 			c=match[i];
-			if(Character.isDigit(c)){
+			if(Tools.isDigit(c)){
 				current=(current*10)+(c-'0');
 			}else{
 				if(mode==c){
@@ -1549,11 +1800,11 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 //						System.out.println("G: mode="+(char)mode+", c="+(char)c+", current="+current+", good="+good+", bad="+bad);
 					}else if(mode=='R' || mode=='N'){
 						n+=current;
-					}else if(mode=='C'){
+					}else if(mode=='C' || mode=='V'){
 						//Do nothing
 						//I assume this is clipped because it went off the end of a scaffold, and thus is irrelevant to identity
 					}else if(mode!='0'){
-						assert(mode=='S' || mode=='D' || mode=='I' || mode=='X' || mode=='Y') : (char)mode;
+						assert(mode=='S' || mode=='D' || mode=='I' || mode=='X' || mode=='Y' || mode=='i' || mode=='d') : (char)mode;
 						if(mode!='D' || current<SamLine.INTRON_LIMIT){
 							bad+=current;
 						}
@@ -1564,13 +1815,13 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 				}
 			}
 		}
-		if(current>0 || !Character.isDigit(c)){
+		if(current>0 || !Tools.isDigit(c)){
 			current=Tools.max(current, 1);
 			if(mode=='m'){
 				good+=current;
 			}else if(mode=='R' || mode=='N'){
 				n+=current;
-			}else if(mode=='C'){
+			}else if(mode=='C' || mode=='V'){
 				//Do nothing
 				//I assume this is clipped because it went off the end of a scaffold, and thus is irrelevant to identity
 			}else if(mode!='0'){
@@ -1582,11 +1833,10 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 			}
 		}
 		
-		
-		n=(n+3)/4;
-		good+=n;
-		bad+=3*n;
-		float r=good/(float)Tools.max(good+bad, 1);
+
+		float good2=good+n*(penalizeN ? 0.25f : 0);
+		float bad2=bad+n*(penalizeN ? 0.75f : 0);
+		float r=good2/Tools.max(good2+bad2, 1);
 //		assert(false) : new String(match)+"\nmode='"+(char)mode+"', current="+current+", good="+good+", bad="+bad;
 
 //		System.out.println("match="+new String(match)+"\ngood="+good+", bad="+bad+", r="+r);
@@ -1600,7 +1850,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	 * @param match string
 	 * @return Identity based on number of match, sub, del, ins, or N symbols
 	 */
-	public static final float identitySkewed(byte[] match) {
+	public static final float identitySkewed(byte[] match, boolean penalizeN, boolean sqrt, boolean log, boolean single) {
 //		assert(false) : new String(match);
 		if(match==null || match.length<1){return 0;}
 		
@@ -1610,7 +1860,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		int current=0;
 		for(int i=0; i<match.length; i++){
 			c=match[i];
-			if(Character.isDigit(c)){
+			if(Tools.isDigit(c)){
 				current=(current*10)+(c-'0');
 			}else{
 				if(mode==c){
@@ -1624,20 +1874,22 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 					}else if(mode=='D'){
 						if(current<SamLine.INTRON_LIMIT){
 							int x;
-							x=(int)Math.ceil(Math.sqrt(current));
-							//x=(int)Math.ceil(Tools.log2(current));
-							//May need special handling....
+							
+							if(sqrt){x=(int)Math.ceil(Math.sqrt(current));}
+							else if(log){x=(int)Math.ceil(Tools.log2(current));}
+							else{x=1;}
+							
 							bad+=(Tools.min(x, current));
 						}
 						
 //						System.out.println("D: mode="+(char)mode+", c="+(char)c+", current="+current+", good="+good+", bad="+bad+", x="+x);
 					}else if(mode=='R' || mode=='N'){
 						n+=current;
-					}else if(mode=='C'){
+					}else if(mode=='C' || mode=='V'){
 						//Do nothing
 						//I assume this is clipped because it went off the end of a scaffold, and thus is irrelevant to identity
 					}else if(mode!='0'){
-						assert(mode=='S' || mode=='I' || mode=='X' || mode=='Y') : (char)mode;
+						assert(mode=='S' || mode=='I' || mode=='X' || mode=='Y' || mode=='i' || mode=='d') : (char)mode;
 						bad+=current;
 //						System.out.println("B: mode="+(char)mode+", c="+(char)c+", current="+current+", good="+good+", bad="+bad);
 					}
@@ -1646,13 +1898,13 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 				}
 			}
 		}
-		if(current>0 || !Character.isDigit(c)){
+		if(current>0 || !Tools.isDigit(c)){
 			current=Tools.max(current, 1);
 			if(mode=='m'){
 				good+=current;
 			}else if(mode=='R' || mode=='N'){
 				n+=current;
-			}else if(mode=='C'){
+			}else if(mode=='C' || mode=='V'){
 				//Do nothing
 				//I assume this is clipped because it went off the end of a scaffold, and thus is irrelevant to identity
 			}else if(mode!='0'){
@@ -1665,10 +1917,9 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		}
 		
 		
-		n=(n+3)/4;
-		good+=n;
-		bad+=n;
-		float r=good/(float)Tools.max(good+bad, 1);
+		float good2=good+n*(penalizeN ? 0.25f : 0);
+		float bad2=bad+n*(penalizeN ? 0.75f : 0);
+		float r=good2/Tools.max(good2+bad2, 1);
 //		assert(false) : new String(match)+"\nmode='"+(char)mode+"', current="+current+", good="+good+", bad="+bad;
 
 //		System.out.println("match="+new String(match)+"\ngood="+good+", bad="+bad+", r="+r);
@@ -1678,6 +1929,10 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	}
 	
 	public boolean failsChastity(){
+		return failsChastity(true);
+	}
+	
+	public boolean failsChastity(boolean processAssertions){
 		if(id==null){return false;}
 		int space=id.indexOf(' ');
 		if(space<0 || space+5>id.length()){return false;}
@@ -1688,15 +1943,19 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		
 		if(a=='/'){
 			if(b<'1' || b>'4' || c!=':'){
-				KillSwitch.kill("Strangely formatted read.  Please disable chastityfilter.  id:"+id);
+				if(!processAssertions){return false;}
+				KillSwitch.kill("Strangely formatted read.  Please disable chastityfilter with the flag chastityfilter=f.  id:"+id);
 			}
 			return d=='Y';
 		}else{
-			assert(a=='1' || a=='2' || a=='3' || a=='4') : id;
-			assert(b==':') : id;
-			assert(d==':');
+			if(processAssertions){
+				assert(a=='1' || a=='2' || a=='3' || a=='4') : id;
+				assert(b==':') : id;
+				assert(d==':');
+			}
 			if(a<'1' || a>'4' || b!=':' || d!=':'){
-				KillSwitch.kill("Strangely formatted read.  Please disable chastityfilter.  id:"+id);
+				if(!processAssertions){return false;}
+				KillSwitch.kill("Strangely formatted read.  Please disable chastityfilter with the flag chastityfilter=f.  id:"+id);
 			}
 			return c=='Y';
 		}
@@ -1705,8 +1964,9 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	public boolean failsBarcode(HashSet<String> set, boolean failIfNoBarcode){
 		if(id==null){return false;}
 		
-		final int loc=(id==null ? -1 : id.lastIndexOf(':'));
-		if(loc<0 || loc>=id.length()-1){
+		final int loc=id.lastIndexOf(':');
+		final int loc2=Tools.max(id.indexOf(' '), id.indexOf('/'));
+		if(loc<0 || loc<=loc2 || loc>=id.length()-1){
 			return failIfNoBarcode;
 		}
 		
@@ -1722,30 +1982,92 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 			return !set.contains(code);
 		}
 	}
+	
+	/** 
+	 * Parse the barcode from an Illumina header.
+	 * @param failIfNoBarcode Terminate the JVM if no barcode is present. 
+	 * @return The barcode
+	 */
+	public String barcode(boolean failIfNoBarcode){
+		
+		if(id==null){
+			if(failIfNoBarcode && Shared.EA()){
+				KillSwitch.kill("Encountered a read header without a barcode:\n"+id+"\n");
+			}
+			return null;
+		}
+		
+		final int loc=id.lastIndexOf(':');
+		final int loc2=Tools.max(id.indexOf(' '), id.indexOf('/'));
+		if(loc<0 || loc<=loc2 || loc>=id.length()-1){
+			if(failIfNoBarcode && Shared.EA()){
+				KillSwitch.kill("Encountered a read header without a barcode:\n"+id+"\n");
+			}
+			return null;
+		}
+		
+		String code=id.substring(loc+1);
+		return code;
+	}
+	
+	/**
+	 * @return The rname of this Read's SamLine, if present and mapped.
+	 */
+	public String rnameS() {
+		if(samline==null || !samline.mapped()){return null;}
+		return samline.rnameS();
+	}
 
 	/** Average based on summing quality scores */
-	public int avgQuality(boolean countUndefined, int maxBases){
-		return AVERAGE_QUALITY_BY_PROBABILITY ? avgQualityByProbability(countUndefined, maxBases) : avgQualityByScore(maxBases);
+	public double avgQuality(boolean countUndefined, int maxBases){
+		return AVERAGE_QUALITY_BY_PROBABILITY ? avgQualityByProbabilityDouble(countUndefined, maxBases) : avgQualityByScoreDouble(maxBases);
+	}
+
+	/** Average based on summing quality scores */
+	public int avgQualityInt(boolean countUndefined, int maxBases){
+		return AVERAGE_QUALITY_BY_PROBABILITY ? avgQualityByProbabilityInt(countUndefined, maxBases) : avgQualityByScoreInt(maxBases);
 	}
 	
 	/** Average based on summing error probabilities */
-	public int avgQualityByProbability(boolean countUndefined, int maxBases){
+	public int avgQualityByProbabilityInt(boolean countUndefined, int maxBases){
 		if(bases==null || bases.length==0){return 0;}
-		return avgQualityByProbability(bases, quality, countUndefined, maxBases);
+		return avgQualityByProbabilityInt(bases, quality, countUndefined, maxBases);
 	}
 	
 	/** Average based on summing error probabilities */
-	public static int avgQualityByProbability(byte[] bases, byte[] quality, boolean countUndefined, int maxBases){
+	public double avgQualityByProbabilityDouble(boolean countUndefined, int maxBases){
+		if(bases==null || bases.length==0){return 0;}
+		return avgQualityByProbabilityDouble(bases, quality, countUndefined, maxBases);
+	}
+	
+	/** Average based on summing error probabilities */
+	public double probabilityErrorFree(boolean countUndefined, int maxBases){
+		if(bases==null || bases.length==0){return 0;}
+		return probabilityErrorFree(bases, quality, countUndefined, maxBases);
+	}
+	
+	/** Average based on summing error probabilities */
+	public static int avgQualityByProbabilityInt(byte[] bases, byte[] quality, boolean countUndefined, int maxBases){
 		if(quality==null){return 40;}
 		if(quality.length==0){return 0;}
 		float e=expectedErrors(bases, quality, countUndefined, maxBases);
 		final int div=(maxBases<1 ? quality.length : Tools.min(maxBases, quality.length));
 		float p=e/div;
-		return QualityTools.probCorrectToPhred(1-p);
+		return QualityTools.probErrorToPhred(p);
+	}
+	
+	/** Average based on summing error probabilities */
+	public static double avgQualityByProbabilityDouble(byte[] bases, byte[] quality, boolean countUndefined, int maxBases){
+		if(quality==null){return 40;}
+		if(quality.length==0){return 0;}
+		float e=expectedErrors(bases, quality, countUndefined, maxBases);
+		final int div=(maxBases<1 ? quality.length : Tools.min(maxBases, quality.length));
+		float p=e/div;
+		return QualityTools.probErrorToPhredDouble(p);
 	}
 
 	/** Average based on summing quality scores */
-	public int avgQualityByScore(int maxBases){
+	public int avgQualityByScoreInt(int maxBases){
 		if(bases==null || bases.length==0){return 0;}
 		if(quality==null){return 40;}
 		int x=0, limit=(maxBases<1 ? quality.length : Tools.min(maxBases, quality.length));
@@ -1754,6 +2076,18 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 			x+=(b<0 ? 0 : b);
 		}
 		return x/limit;
+	}
+
+	/** Average based on summing quality scores */
+	public double avgQualityByScoreDouble(int maxBases){
+		if(bases==null || bases.length==0){return 0;}
+		if(quality==null){return 40;}
+		int x=0, limit=(maxBases<1 ? quality.length : Tools.min(maxBases, quality.length));
+		for(int i=0; i<limit; i++){
+			byte b=quality[i];
+			x+=(b<0 ? 0 : b);
+		}
+		return x/(double)limit;
 	}
 	
 	/** Used by BBMap tipsearch. */
@@ -1784,10 +2118,21 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		return x/n;
 	}
 	
+	/** Used by BBDuk. */
+	public int minQuality(){
+		byte min=41;
+		if(bases!=null && quality!=null){
+			for(byte q : quality){
+				min=Tools.min(min, q);
+			}
+		}
+		return min;
+	}
+	
 	/** Used by BBMap tipsearch. */
 	public byte minQualityFirstNBases(int n){
 		if(bases==null || bases.length==0){return 0;}
-		if(quality==null || n<1){return 40;}
+		if(quality==null || n<1){return 41;}
 		assert(quality!=null && n>0);
 		if(n>quality.length){return 0;}
 		byte x=quality[0];
@@ -1801,7 +2146,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	/** Used by BBMap tipsearch. */
 	public byte minQualityLastNBases(int n){
 		if(bases==null || bases.length==0){return 0;}
-		if(quality==null || n<1){return 40;}
+		if(quality==null || n<1){return 41;}
 		assert(quality!=null && n>0);
 		if(n>quality.length){return 0;}
 		byte x=quality[bases.length-n];
@@ -1830,6 +2175,78 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 			if(b>'9' && b!='m' && b!='N'){return true;}
 		}
 		return false;
+	}
+	
+	public boolean containsVariants(){
+		assert(match!=null && valid()) : (match==null)+", "+(valid())+"\n"+samline+"\n";
+		for(int i=0; i<match.length; i++){
+			byte b=match[i];
+			assert(b!='M');
+			if(b>'9' && b!='m' && b!='N' && b!='C'){return true;}
+		}
+		return false;
+	}
+	
+	public boolean containsClipping(){
+		assert(match!=null && valid()) : (match==null)+", "+(valid())+"\n"+samline+"\n";
+		if(match.length<1){return false;}
+		if(match[0]=='C'){return true;}
+		for(int i=match.length-1; i>0; i--){
+			if(match[i]=='C'){return true;}
+			if(match[i]>'9'){break;}
+		}
+		return false;
+	}
+	
+	/**
+	 * @return {m,S,C,N,I,D};
+	 */
+	public int[] countMatchSymbols(){
+		int m=0, S=0, C=0, N=0, I=0, D=0;
+		int current=0;
+		byte last='?';
+		for(byte b : match){
+			if(Tools.isDigit(b)){
+				current=current*10+b-'0';
+			}else{
+				current=Tools.max(current, 1);
+				if(last=='m'){
+					m+=current;
+				}else if(last=='S'){
+					S+=current;
+				}else if(last=='C'){
+					C+=current;
+				}else if(last=='N'){
+					N+=current;
+				}else if(last=='I'){
+					I+=current;
+				}else if(last=='D'){
+					D+=current;
+				}else{
+					assert(last=='?') : "Unhandled symbol "+(char)last+"\n"+new String(match);
+				}
+				current=0;
+				last=b;
+			}
+		}
+		current=Tools.max(current, 1);
+		if(last=='m'){
+			m+=current;
+		}else if(last=='S'){
+			S+=current;
+		}else if(last=='C'){
+			C+=current;
+		}else if(last=='N'){
+			N+=current;
+		}else if(last=='I'){
+			I+=current;
+		}else if(last=='D'){
+			D+=current;
+		}else{
+			assert(last=='?') : "Unhandled symbol "+(char)last+"\n"+new String(match);
+		}
+		current=0;
+		return new int[] {m,S,C,N,I,D};
 	}
 	
 	public boolean containsNonNMXY(){
@@ -1888,7 +2305,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	}
 	
 	public int countSubs(){
-		assert(match!=null && valid() && !shortmatch());
+		assert(match!=null && valid()) : (match!=null)+", "+valid()+", "+shortmatch();
 		return countSubs(match);
 	}
 	
@@ -1914,59 +2331,119 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	}
 	
 	public static int countSubs(byte[] match){
+		int S=0;
+		int current=0;
+		byte last='?';
+		for(byte b : match){
+			if(Tools.isDigit(b)){
+				current=current*10+b-'0';
+			}else{
+				if(last=='S'){S+=Tools.max(1, current);}
+				current=0;
+				last=b;
+			}
+		}
+		if(last=='S'){S+=Tools.max(1, current);}
+//		assert(S==0) : S+"\t"+new String(match);
+		return S;
+//		int x=0;
+//		assert(match!=null);
+//		for(int i=0; i<match.length; i++){
+//			byte b=match[i];
+//			if(b=='S'){x++;}
+//			assert(!Tools.isDigit(b));
+//		}
+//		return x;
+	}
+	
+	public static int countVars(byte[] match){
+		return countVars(match, true, true, true);
+	}
+	
+	public static int countVars(byte[] match, boolean sub, boolean ins, boolean del){
+		int S=0, I=0, D=0;
+		int current=0;
+		byte last='?';
+		for(byte b : match){
+			if(Tools.isDigit(b)){
+				current=current*10+b-'0';
+			}else{
+				if(last=='S'){S+=Tools.max(1, current);}
+				else if(last=='I'){I++;}
+				else if(last=='D'){D++;}
+				current=0;
+				last=b;
+			}
+		}
+		if(last=='S'){S+=Tools.max(1, current);}
+		else if(last=='I'){I++;}
+		else if(last=='D'){D++;}
+		return (sub ? S : 0)+(ins ? I : 0)+(del ? D : 0);
+	}
+	
+	public static boolean containsSubs(byte[] match){
 		int x=0;
 		assert(match!=null);
 		for(int i=0; i<match.length; i++){
 			byte b=match[i];
-			if(b=='S'){x++;}
-			assert(!Character.isDigit(b));
+			if(b=='S'){return true;}
 		}
-		return x;
+		return false;
 	}
 	
-	public static int countNocalls(byte[] bases){
+	public static boolean containsVars(byte[] match){
+		int x=0;
+		assert(match!=null);
+		for(int i=0; i<match.length; i++){
+			byte b=match[i];
+			if(b=='S' || b=='I' || b=='D'){return true;}
+		}
+		return false;
+	}
+	
+	public static int countNocalls(byte[] match){
 		int n=0;
-		for(int i=0; i<bases.length; i++){
-			byte b=bases[i];
+		for(int i=0; i<match.length; i++){
+			byte b=match[i];
 			if(b=='N'){n++;}
 		}
 		return n;
 	}
 	
-	public static int countInsertions(byte[] bases){
+	public static int countInsertions(byte[] match){
 		int n=0;
-		for(int i=0; i<bases.length; i++){
-			byte b=bases[i];
+		for(int i=0; i<match.length; i++){
+			byte b=match[i];
 			if(b=='I'){n++;}
 		}
 		return n;
 	}
 	
-	public static int countDeletions(byte[] bases){
+	public static int countDeletions(byte[] match){
 		int n=0;
-		for(int i=0; i<bases.length; i++){
-			byte b=bases[i];
+		for(int i=0; i<match.length; i++){
+			byte b=match[i];
 			if(b=='D'){n++;}
 		}
 		return n;
 	}
 	
-	public static int countInsertionEvents(byte[] bases){
+	public static int countInsertionEvents(byte[] match){
 		int n=0;
 		byte prev='N';
-		for(int i=0; i<bases.length; i++){
-			byte b=bases[i];
+		for(int i=0; i<match.length; i++){
+			byte b=match[i];
 			if(b=='I' && prev!=b){n++;}
 			prev=b;
 		}
 		return n;
 	}
 	
-	public static int countDeletionEvents(byte[] bases){
+	public static int countDeletionEvents(byte[] match){
 		int n=0;
 		byte prev='N';
-		for(int i=0; i<bases.length; i++){
-			byte b=bases[i];
+		for(int i=0; i<match.length; i++){
+			byte b=match[i];
 			if(b=='D' && prev!=b){n++;}
 			prev=b;
 		}
@@ -1983,26 +2460,37 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	
 	public boolean containsUndefined(){
 		if(bases==null){return false;}
+		final byte[] symbolToNumber=AminoAcid.symbolToNumber(amino());
 		for(byte b : bases){
-			if(AminoAcid.baseToNumber[b]<0){return true;}
+			if(symbolToNumber[b]<0){return true;}
+		}
+		return false;
+	}
+	
+	public boolean containsLowercase(){
+		if(bases==null){return false;}
+		for(byte b : bases){
+			if(Tools.isLowerCase(b)){return true;}
 		}
 		return false;
 	}
 	
 	public int countUndefined(){
 		if(bases==null){return 0;}
+		final byte[] symbolToNumber=AminoAcid.symbolToNumber(amino());
 		int n=0;
 		for(byte b : bases){
-			if(AminoAcid.baseToNumber[b]<0){n++;}
+			if(symbolToNumber[b]<0){n++;}
 		}
 		return n;
 	}
 	
 	public boolean hasMinConsecutiveBases(final int min){
 		if(bases==null){return min<=0;}
+		final byte[] symbolToNumber=AminoAcid.symbolToNumber(amino());
 		int len=0;
 		for(byte b : bases){
-			if(AminoAcid.baseToNumber[b]<0){len=0;}
+			if(symbolToNumber[b]<0){len=0;}
 			else{
 				len++;
 				if(len>=min){return true;}
@@ -2075,7 +2563,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 				byte c=bases[cloc];
 				if(r=='N' || c=='N'){
 					match[mloc]='N';
-				}else if(r==c || Character.toUpperCase(r)==Character.toUpperCase(c)){
+				}else if(r==c || Tools.toUpperCase(r)==Tools.toUpperCase(c)){
 					match[mloc]='m';
 				}else{
 					if(ca==null){
@@ -2108,8 +2596,32 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		return expectedTipErrors(bases, quality, countUndefined, maxBases);
 	}
 	
+	public float expectedErrorsIncludingMate(boolean countUndefined){
+		float a=expectedErrors(countUndefined, length());
+		float b=(mate==null ? 0 : mate.expectedErrors(countUndefined, mate.length()));
+		return a+b;
+	}
+	
 	public float expectedErrors(boolean countUndefined, int maxBases){
 		return expectedErrors(bases, quality, countUndefined, maxBases);
+	}
+	
+	public static float probabilityErrorFree(byte[] bases, byte[] quality, boolean countUndefined, int maxBases){
+		if(quality==null){return 0;}
+		final int limit=(maxBases<1 ? quality.length : Tools.min(maxBases, quality.length));
+		final float[] array=QualityTools.PROB_CORRECT;
+		assert(array[0]>0 && array[0]<1);
+		float product=1;
+		for(int i=0; i<limit; i++){
+			byte b=bases[i];
+			byte q=quality[i];
+			if(AminoAcid.isFullyDefined(b)){
+				product*=array[q];
+			}else if(countUndefined){
+				return 0;
+			}
+		}
+		return product;
 	}
 	
 	public static float expectedErrors(byte[] bases, byte[] quality, boolean countUndefined, int maxBases){
@@ -2120,12 +2632,11 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		float sum=0;
 		for(int i=0; i<limit; i++){
 			byte b=bases[i];
-			byte q=quality[i];
-			if(AminoAcid.isFullyDefined(b)){
+			boolean d=AminoAcid.isFullyDefined(b);
+			//assert((quality[i]==0)==d) : "Q="+quality[i]+" for base "+(char)b;
+			if(d || countUndefined){
+				byte q=(d ? quality[i] : 0);
 				sum+=array[q];
-			}else{
-				assert(q==0);
-				if(countUndefined){sum+=0.75f;}
 			}
 		}
 		return sum;
@@ -2218,7 +2729,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 			}else if(b=='S'){
 				s++;
 			}else{
-				if(Character.isDigit(b) && shortmatch()){
+				if(Tools.isDigit(b) && shortmatch()){
 					System.err.println("Warning! Found read in shortmatch form during countErrors():\n"+this); //Usually caused by verbose output.
 					if(mate!=null){System.err.println("mate:\n"+mate.id+"\t"+new String(mate.bases));}
 					System.err.println("Stack trace: ");
@@ -2244,7 +2755,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		int streak=0;
 		for(int i=0; i<match.length; i++){
 			byte b=match[i];
-			if(Character.isDigit(b)){return true;}
+			if(Tools.isDigit(b)){return true;}
 			if(b==last){
 				streak++;
 				if(streak>3){return true;}
@@ -2256,37 +2767,48 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		return false;
 	}
 	
+	public void toShortMatchString(boolean doAssertion){
+		if(shortmatch()){
+			assert(!doAssertion);
+			return;
+		}
+		match=toShortMatchString(match);
+		setShortMatch(true);
+	}
+	
 	public static byte[] toShortMatchString(byte[] match){
 		if(match==null){return null;}
 		assert(match.length>0);
-		StringBuilder sb=new StringBuilder(10);
+		ByteBuilder sb=new ByteBuilder(10);
 		
 		byte prev=match[0];
 		int count=1;
 		for(int i=1; i<match.length; i++){
 			byte m=match[i];
-			assert(Character.isLetter(m) || m==0) : new String(match);
+			assert(Tools.isLetter(m) || m==0) : new String(match);
 			if(m==0){System.err.println("Warning! Converting empty match string to short form.");}
 			if(m==prev){count++;}
 			else{
-				sb.append((char)prev);
-				if(count>2){sb.append(count);}
-				else if(count==2){sb.append((char)prev);}
+				sb.append(prev);
+				if(count>1){sb.append(count);}
+//				else if(count==2){sb.append(prev);}
 				prev=m;
 				count=1;
 			}
 		}
-		sb.append((char)prev);
-		if(count>2){sb.append(count);}
-		else if(count==2){sb.append((char)prev);}
+		sb.append(prev);
+		if(count>1){sb.append(count);}
+//		else if(count==2){sb.append(prev);}
 		
-		byte[] r=new byte[sb.length()];
-		for(int i=0; i<sb.length(); i++){r[i]=(byte)sb.charAt(i);}
+		byte[] r=sb.toBytes();
 		return r;
 	}
 	
-	public void toLongMatchString(){
-		assert(shortmatch());
+	public void toLongMatchString(boolean doAssertion){
+		if(!shortmatch()){
+			assert(!doAssertion);
+			return;
+		}
 		match=toLongMatchString(match);
 		setShortMatch(false);
 	}
@@ -2299,12 +2821,12 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		int current=0;
 		for(int i=0; i<shortmatch.length; i++){
 			byte m=shortmatch[i];
-			if(Character.isLetter(m)){
+			if(Tools.isLetter(m)){
 				count++;
 				count+=(current>0 ? current-1 : 0);
 				current=0;
 			}else{
-				assert(Character.isDigit(m));
+				assert(Tools.isDigit(m));
 				current=(current*10)+(m-48); //48 == '0'
 			}
 		}
@@ -2317,7 +2839,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		int j=0;
 		for(int i=0; i<shortmatch.length; i++){
 			byte m=shortmatch[i];
-			if(Character.isLetter(m)){
+			if(Tools.isLetter(m)){
 				while(current>1){
 					r[j]=lastLetter;
 					current--;
@@ -2329,7 +2851,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 				j++;
 				lastLetter=m;
 			}else{
-				assert(Character.isDigit(m));
+				assert(Tools.isDigit(m));
 				current=(current*10)+(m-48); //48 == '0'
 			}
 		}
@@ -2344,18 +2866,8 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	}
 	
 	public String parseCustomRname(){
-		for(int i=0, under=0; i<id.length(); i++){
-			if(id.charAt(i)=='_'){
-				under++;
-				if(under==6){
-					if(id.length()>i+1){
-						return id.substring(i+1);
-					}
-					return null;
-				}
-			}
-		}
-		return null;
+		assert(id.startsWith("SYN")) : "Can't parse header "+id;
+		return new Header(id, pairnum()).rname;
 	}
 
 	/** Bases of the read. */
@@ -2369,6 +2881,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	
 	public int[] gaps;
 	
+	public String name() {return id;}
 	public String id;
 	public long numericID;
 	public int chrom;
@@ -2377,7 +2890,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	
 	public int copies=1;
 
-	/** Errors detected (remaining) */
+	/** Errors detected */
 	public int errors=0;
 	
 	/** Alignment score from BBMap.  Assumed to max at approx 100*bases.length */
@@ -2385,7 +2898,8 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	
 	public ArrayList<SiteScore> sites;
 	public SiteScore originalSite; //Origin site for synthetic reads
-	public Serializable obj=null; //For testing only
+	public Object obj=null;//Don't set this to a SamLine; it's for other things.
+	public SamLine samline=null;
 	public Read mate;
 	
 	public int flags;
@@ -2402,10 +2916,63 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		assert(obj!=null && obj.getClass()==Long.class) : obj;
 		return ((Long)obj).longValue();
 	}
+	/** Number of bases in this pair, including the mate if present. */
+	public int pairLength(){return length()+mateLength();}
+	/** Number of bases in this pair, including the mate if present. */
+	public int numPairKmers(int k){return numKmers(k)+numMateKmers(k);}
+	/** Number of reads in this pair.  Returns 1 if the read has no mate, and 2 if it does. */
+	public int pairCount(){return 1+mateCount();}
 	public int length(){return bases==null ? 0 : bases.length;}
+	public int numKmers(int k){return bases==null ? 0 : Tools.max(0, bases.length-k+1);}
+	public int qlength(){return quality==null ? 0 : quality.length;}
 	public int mateLength(){return mate==null ? 0 : mate.length();}
+	public int numMateKmers(int k){return mate==null ? 0 : mate.numKmers(k);}
+	public String mateId(){return mate==null ? null : mate.id;}
 	public int mateCount(){return mate==null ? 0 : 1;}
 	public boolean mateMapped(){return mate==null ? false : mate.mapped();}
+	public long countMateBytes(){return mate==null ? 0 : mate.countBytes();}
+	public long countMateFastqBytes(){return mate==null ? 0 : mate.countFastqBytes();}
+	/** Number of bytes this read pair uses in memory, approximately */
+	public long countPairBytes(){return countBytes()+(mate==null ? 0 : mate.countBytes());}
+	
+	/** Number of bytes this read uses in memory, approximately */
+	public long countBytes(){
+		long sum=129; //Approximate per-read overhead
+		sum+=(bases==null ? 0 : bases.length+16);
+		sum+=(quality==null ? 0 : quality.length+16);
+		sum+=(id==null ? 0 : id.length()*2+16);
+		sum+=(match==null ? 0 : match.length+16);
+		sum+=(samline==null ? 0 : samline.countBytes());
+		return sum;
+	}
+	
+	/** Number of bytes this read uses in on disk in Fastq format */
+	public long countFastqBytes(){
+		long sum=6;//4 newlines, +, @
+		sum+=(bases==null ? 0 : bases.length);
+		sum+=(quality==null ? 0 : quality.length);
+		sum+=(id==null ? 0 : id.length());
+		return sum;
+	}
+	
+	public int countLeft(final char base){return countLeft((byte)base);}
+	public int countRight(final char base){return countRight((byte)base);}
+	
+	public int countLeft(final byte base){
+		for(int i=0; i<bases.length; i++){
+			final byte b=bases[i];
+			if(b!=base){return i;}
+		}
+		return bases.length;
+	}
+	
+	public int countRight(final byte base){
+		for(int i=bases.length-1; i>=0; i--){
+			final byte b=bases[i];
+			if(b!=base){return bases.length-i-1;}
+		}
+		return bases.length;
+	}
 	
 	public boolean untrim(){
 		if(obj==null || obj.getClass()!=TrimRead.class){return false;}
@@ -2416,7 +2983,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	
 	public int trailingLowerCase(){
 		for(int i=bases.length-1; i>=0;){
-			if(Character.isLowerCase(bases[i])){
+			if(Tools.isLowerCase(bases[i])){
 				i--;
 			}else{
 				return bases.length-i-1;
@@ -2426,11 +2993,12 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	}
 	public int leadingLowerCase(){
 		for(int i=0; i<bases.length; i++){
-			if(!Character.isLowerCase(bases[i])){return i;}
+			if(!Tools.isLowerCase(bases[i])){return i;}
 		}
 		return bases.length;
 	}
-	
+
+	public char strandChar(){return Shared.strandCodes2[strand()];}
 	public byte strand(){return (byte)(flags&1);}
 	public boolean mapped(){return (flags&MAPPEDMASK)==MAPPEDMASK;}
 	public boolean paired(){return (flags&PAIREDMASK)==PAIREDMASK;}
@@ -2444,11 +3012,15 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	public boolean swapped(){return (flags&SWAPMASK)==SWAPMASK;}
 	public boolean shortmatch(){return (flags&SHORTMATCHMASK)==SHORTMATCHMASK;}
 	public boolean insertvalid(){return (flags&INSERTMASK)==INSERTMASK;}
-	public boolean hasadapter(){return (flags&ADAPTERMASK)==ADAPTERMASK;}
+	public boolean hasAdapter(){return (flags&ADAPTERMASK)==ADAPTERMASK;}
 	public boolean secondary(){return (flags&SECONDARYMASK)==SECONDARYMASK;}
 	public boolean aminoacid(){return (flags&AAMASK)==AAMASK;}
+	public boolean amino(){return (flags&AAMASK)==AAMASK;}
 	public boolean junk(){return (flags&JUNKMASK)==JUNKMASK;}
 	public boolean validated(){return (flags&VALIDATEDMASK)==VALIDATEDMASK;}
+	public boolean tested(){return (flags&TESTEDMASK)==TESTEDMASK;}
+	public boolean invertedRepeat(){return (flags&IRMASK)==IRMASK;}
+	public boolean trimmed(){return (flags&TRIMMEDMASK)==TRIMMEDMASK;}
 	
 	/** For paired ends: 0 for read1, 1 for read2 */
 	public int pairnum(){return (flags&PAIRNUMMASK)>>PAIRNUMSHIFT;}
@@ -2516,7 +3088,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		boolean flag=(match.length==bases.length);
 		if(shortmatch()){
 			flag=(match.length==0 || match[0]=='m');
-			for(int i=0; i<match.length && flag; i++){flag=(match[i]=='m' || Character.isDigit(match[i]));}
+			for(int i=0; i<match.length && flag; i++){flag=(match[i]=='m' || Tools.isDigit(match[i]));}
 		}else{
 			for(int i=0; i<match.length && flag; i++){flag=(match[i]=='m');}
 		}
@@ -2525,7 +3097,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	}
 
 	/**
-	 * @return
+	 * @return GC fraction
 	 */
 	public float gc() {
 		if(bases==null || bases.length<1){return 0;}
@@ -2722,8 +3294,8 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	
 	public Read subRead(int from, int to){
 		Read r=this.clone();
-		r.bases=Arrays.copyOfRange(bases, from, to);
-		r.quality=(quality==null ? null : Arrays.copyOfRange(quality, from, to));
+		r.bases=KillSwitch.copyOfRange(bases, from, to);
+		r.quality=(quality==null ? null : KillSwitch.copyOfRange(quality, from, to));
 		r.mate=null;
 //		assert(Tools.indexOf(r.bases, (byte)'J')<0);
 		return r;
@@ -2747,8 +3319,10 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		final int overlap=Tools.min(insert, lengthSum-insert);
 		
 //		System.err.println(insert);
-		final byte[] bases=new byte[insert];
-		final byte[] quals=(a.quality==null || b.quality==null ? null : new byte[insert]);
+		final byte[] bases=new byte[insert], abases=a.bases, bbases=b.bases;
+		final byte[] aquals=a.quality, bquals=b.quality;
+		final byte[] quals=(aquals==null || bquals==null ? null : new byte[insert]);
+		assert(aquals==null || (aquals.length==abases.length && bquals.length==bbases.length));
 		
 		int mismatches=0;
 		
@@ -2758,26 +3332,26 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 			int lim=insert-b.length();
 			if(quals==null){
 				for(int i=0; i<a.length(); i++){
-					bases[i]=a.bases[i];
+					bases[i]=abases[i];
 				}
 				for(int i=a.length(); i<lim; i++){
 					bases[i]='N';
 				}
 				for(int i=0; i<b.length(); i++){
-					bases[i+lim]=b.bases[i];
+					bases[i+lim]=bbases[i];
 				}
 			}else{
 				for(int i=0; i<a.length(); i++){
-					bases[i]=a.bases[i];
-					quals[i]=a.quality[i];
+					bases[i]=abases[i];
+					quals[i]=aquals[i];
 				}
 				for(int i=a.length(); i<lim; i++){
 					bases[i]='N';
 					quals[i]=0;
 				}
 				for(int i=0; i<b.length(); i++){
-					bases[i+lim]=b.bases[i];
-					quals[i+lim]=b.quality[i];
+					bases[i+lim]=bbases[i];
+					quals[i+lim]=bquals[i];
 				}
 			}
 			
@@ -2789,8 +3363,8 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 //			final int lim1=a.length()-overlap;
 //			final int lim2=a.length();
 //			for(int i=0; i<lim1; i++){
-//				bases[i]=a.bases[i];
-//				quals[i]=a.quality[i];
+//				bases[i]=abases[i];
+//				quals[i]=aquals[i];
 //			}
 //			for(int i=lim1, j=0; i<lim2; i++, j++){
 //				assert(false) : "TODO";
@@ -2798,16 +3372,16 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 //				quals[i]=0;
 //			}
 //			for(int i=lim2, j=overlap; i<bases.length; i++, j++){
-//				bases[i]=b.bases[j];
-//				quals[i]=b.quality[j];
+//				bases[i]=bbases[j];
+//				quals[i]=bquals[j];
 //			}
 		}else{ //reads go off ends of molecule.
 			if(quals==null){
 				for(int i=0; i<a.length() && i<bases.length; i++){
-					bases[i]=a.bases[i];
+					bases[i]=abases[i];
 				}
 				for(int i=bases.length-1, j=b.length()-1; i>=0 && j>=0; i--, j--){
-					byte ca=bases[i], cb=b.bases[j];
+					byte ca=bases[i], cb=bbases[j];
 					if(ca==0 || ca=='N'){
 						bases[i]=cb;
 					}else if(ca==cb){
@@ -2818,12 +3392,12 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 				}
 			}else{
 				for(int i=0; i<a.length() && i<bases.length; i++){
-					bases[i]=a.bases[i];
-					quals[i]=a.quality[i];
+					bases[i]=abases[i];
+					quals[i]=aquals[i];
 				}
 				for(int i=bases.length-1, j=b.length()-1; i>=0 && j>=0; i--, j--){
-					byte ca=bases[i], cb=b.bases[j];
-					byte qa=quals[i], qb=b.quality[j];
+					byte ca=bases[i], cb=bbases[j];
+					byte qa=quals[i], qb=bquals[j];
 					if(ca==0 || ca=='N'){
 						bases[i]=cb;
 						quals[i]=qb;
@@ -2859,7 +3433,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		
 //		System.err.println(bases.length+", "+start+", "+stop);
 		
-		Read r=new Read(bases, a.chrom, start, stop, a.id, null, a.numericID, a.flags);
+		Read r=new Read(bases, null, a.id, a.numericID, a.flags, a.chrom, start, stop);
 		r.quality=quals; //This prevents quality from getting capped.
 		if(a.chrom==0 || start==stop || (!a.mapped() && !a.synthetic())){r.setMapped(true);}
 		r.setInsert(insert);
@@ -2881,9 +3455,9 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 //		assert(false) : "\n\n"+a.toText(false)+"\n\n"+b.toText(false)+"\n\n"+r.toText(false)+"\n\n";
 		
 		//TODO: Triggered by BBMerge in useratio mode for some reason.
-//		assert(Shared.anomaly || (a.insertSizeMapped(false)>0 == r.insertSizeMapped(false)>0)) : 
+//		assert(Shared.anomaly || (a.insertSizeMapped(false)>0 == r.insertSizeMapped(false)>0)) :
 //			"\n"+r.length()+"\n"+r.insert()+"\n"+r.insertSizeMapped(false)+"\n"+a.insert()+"\n"+a.insertSizeMapped(false)+
-//			"\n\n"+a.toText(false)+"\n\n"+b.toText(false)+"\n\n"+r.toText(false)+"\n\n"; 
+//			"\n\n"+a.toText(false)+"\n\n"+b.toText(false)+"\n\n"+r.toText(false)+"\n\n";
 		
 		return r;
 	}
@@ -2891,7 +3465,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	/**
 	 * @param minlen
 	 * @param maxlen
-	 * @return
+	 * @return A list of read fragments
 	 */
 	public ArrayList<Read> split(int minlen, int maxlen) {
 		int len=bases==null ? 0 : bases.length;
@@ -2909,9 +3483,9 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 				int b=(i+1)*actual;
 				if(b>bases.length){b=bases.length;}
 //				if(b-a<)
-				byte[] subbases=Arrays.copyOfRange(bases, a, b);
-				byte[] subquals=(quality==null ? null : Arrays.copyOfRange(quality, a, b+1));
-				Read r=new Read(subbases, -1, -1, -1, id+"_"+i, subquals, numericID, flags);
+				byte[] subbases=KillSwitch.copyOfRange(bases, a, b);
+				byte[] subquals=(quality==null ? null : KillSwitch.copyOfRange(quality, a, b+1));
+				Read r=new Read(subbases, subquals, id+"_"+i, numericID, flags);
 				subreads.add(r);
 			}
 		}
@@ -2930,17 +3504,17 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		
 		final int shift=2*k;
 		final int shift2=shift-2;
-		final long mask=~((-1L)<<shift);
+		final long mask=(shift>63 ? -1L : ~((-1L)<<shift));
 		long kmer=0, rkmer=0;
 		int len=0;
 		
 		for(int i=0; i<bases.length; i++){
 			byte b=bases[i];
-			long x=Dedupe.baseToNumber[b];
-			long x2=Dedupe.baseToComplementNumber[b];
+			long x=AminoAcid.baseToNumber[b];
+			long x2=AminoAcid.baseToComplementNumber[b];
 			kmer=((kmer<<2)|x)&mask;
 			rkmer=(rkmer>>>2)|(x2<<shift2);
-			if(AminoAcid.isFullyDefined(b)){len++;}else{len=0;}
+			if(x<0){len=0; rkmer=0;}else{len++;}
 			if(len>=k){
 				kmers[i-k+1]=makeCanonical ? Tools.max(kmer, rkmer) : kmer;
 			}
@@ -2953,16 +3527,16 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 //		if(gap>0){throw new RuntimeException("Gapped reads: TODO");}
 //		if(k>31){return toLongKmers(k, kmers, makeCanonical, longkmer);}
 //		if(bases==null || bases.length<k+gap){return null;}
-//		
+//
 //		final int kbits=2*k;
-//		final long mask=~((-1L)<<(kbits));
-//		
+//		final long mask=(kbits>63 ? -1L : ~((-1L)<<kbits));
+//
 //		int len=0;
 //		long kmer=0;
 //		final int arraylen=bases.length-k+1;
 //		if(kmers==null || kmers.length!=arraylen){kmers=new long[arraylen];}
 //		Arrays.fill(kmers, -1);
-//		
+//
 //		for(int i=0; i<bases.length; i++){
 //			byte b=bases[i];
 //			int x=AminoAcid.baseToNumber[b];
@@ -2978,10 +3552,10 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 //				}
 //			}
 //		}
-//		
+//
 ////		System.out.println(new String(bases));
 ////		System.out.println(Arrays.toString(kmers));
-//		
+//
 //		if(makeCanonical){
 //			this.reverseComplement();
 //			len=0;
@@ -3003,11 +3577,11 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 //				}
 //			}
 //			this.reverseComplement();
-//			
+//
 ////			System.out.println(Arrays.toString(kmers));
 //		}
-//		
-//		
+//
+//
 //		return kmers;
 //	}
 	
@@ -3038,20 +3612,20 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 //	public long[] toLongKmers(final int k, long[] kmers, boolean makeCanonical, Kmer longkmer) {
 //		assert(k>31) : k;
 //		if(bases==null || bases.length<k){return null;}
-//		
+//
 //		final int kbits=2*k;
 //		final long mask=Long.MAX_VALUE;
-//		
+//
 //		int len=0;
 //		long kmer=0;
 //		final int arraylen=bases.length-k+1;
 //		if(kmers==null || kmers.length!=arraylen){kmers=new long[arraylen];}
 //		Arrays.fill(kmers, -1);
-//		
-//		
+//
+//
 //		final int tailshift=k%32;
 //		final int tailshiftbits=tailshift*2;
-//		
+//
 //		for(int i=0; i<bases.length; i++){
 //			byte b=bases[i];
 //			int x=AminoAcid.baseToNumber[b];
@@ -3096,7 +3670,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 //		}else{
 //			assert(false) : "Long kmers should be made canonical here because they cannot be canonicized later.";
 //		}
-//		
+//
 //		return kmers;
 //	}
 	
@@ -3164,15 +3738,15 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 //			if(ss.gaps[0]!=ss.start || ss.gaps[ss.gaps.length-1]!=ss.stop){return false;}
 ////			assert(ss.gaps[0]==ss.start && ss.gaps[ss.gaps.length-1]==ss.stop);
 //		}
-//		
+//
 //		if(!(ss.pairedScore<1 || (ss.slowScore<=0 && ss.pairedScore>ss.quickScore ) || ss.pairedScore>ss.slowScore)){
 //			System.err.println("Site paired score violation: "+ss.quickScore+", "+ss.slowScore+", "+ss.pairedScore);
 //			return false;
 //		}
-//		
+//
 //		final boolean xy=ss.matchContainsXY();
 //		if(bases!=null){
-//			
+//
 //			final boolean p0=ss.perfect;
 //			final boolean sp0=ss.semiperfect;
 //			final boolean p1=ss.isPerfect(bases);
@@ -3182,13 +3756,13 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 //				"\nnumericID="+id+"\n"+new String(bases)+"\n\n"+Data.getChromosome(ss.chrom).getString(ss.start, ss.stop)+"\n\n"+ss+"\n\n";
 //			assert(sp0==sp1 || (xy && sp1)) : p0+"->"+p1+", "+sp0+"->"+sp1+", "+ss.isSemiPerfect(bases)+
 //				"\nnumericID="+id+"\n"+new String(bases)+"\n\n"+Data.getChromosome(ss.chrom).getString(ss.start, ss.stop)+"\n\n"+ss+"\n\n";
-//			
+//
 ////			ss.setPerfect(bases, false);
-//			
-//			assert(p0==ss.perfect) : 
+//
+//			assert(p0==ss.perfect) :
 //				p0+"->"+ss.perfect+", "+sp0+"->"+ss.semiperfect+", "+ss.isSemiPerfect(bases)+"\nnumericID="+id+"\n\n"+new String(bases)+"\n\n"+
 //				Data.getChromosome(ss.chrom).getString(ss.start, ss.stop)+"\n"+ss+"\n\n";
-//			assert(sp0==ss.semiperfect) : 
+//			assert(sp0==ss.semiperfect) :
 //				p0+"->"+ss.perfect+", "+sp0+"->"+ss.semiperfect+", "+ss.isSemiPerfect(bases)+"\nnumericID="+id+"\n\n"+new String(bases)+"\n\n"+
 //				Data.getChromosome(ss.chrom).getString(ss.start, ss.stop)+"\n"+ss+"\n\n";
 //			if(ss.perfect){assert(ss.semiperfect);}
@@ -3265,6 +3839,21 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		if(b){flags|=VALIDATEDMASK;}
 	}
 	
+	public void setTested(boolean b){
+		flags=(flags&~TESTEDMASK);
+		if(b){flags|=TESTEDMASK;}
+	}
+	
+	public void setInvertedRepeat(boolean b){
+		flags=(flags&~IRMASK);
+		if(b){flags|=IRMASK;}
+	}
+	
+	public void setTrimmed(boolean b){
+		flags=(flags&~TRIMMEDMASK);
+		if(b){flags|=TRIMMEDMASK;}
+	}
+	
 	public void setInsert(int x){
 		if(x<1){x=-1;}
 //		assert(x==-1 || x>9 || length()<20) : x+", "+length(); //Invalid assertion for synthetic reads.
@@ -3286,14 +3875,14 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 
 	public static byte[] getFakeQuality(int len){
 		if(len>=QUALCACHE.length){
-			byte[] r=new byte[len];
+			byte[] r=KillSwitch.allocByte1D(len);
 			Arrays.fill(r, (byte)30);
 			return r;
 		}
 		if(QUALCACHE[len]==null){
 			synchronized(QUALCACHE){
 				if(QUALCACHE[len]==null){
-					QUALCACHE[len]=new byte[len];
+					QUALCACHE[len]=KillSwitch.allocByte1D(len);
 					Arrays.fill(QUALCACHE[len], (byte)30);
 				}
 			}
@@ -3343,6 +3932,7 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 		return r;
 	}
 	
+	@Override
 	public Read clone(){
 		try {
 			return (Read) super.clone();
@@ -3398,31 +3988,96 @@ public final class Read implements Comparable<Read>, Cloneable, Serializable{
 	public static final int AAMASK=(1<<16);
 	public static final int JUNKMASK=(1<<17);
 	public static final int VALIDATEDMASK=(1<<18);
+	public static final int TESTEDMASK=(1<<19);
+	public static final int IRMASK=(1<<20);
+	public static final int TRIMMEDMASK=(1<<21);
 	
-	private static final int[] maskArray=makeMaskArray(18); //Be sure this is big enough for all flags!
+	private static final int[] maskArray=makeMaskArray(22); //Be sure this is big enough for all flags!
 
-//	public static byte ASCII_OFFSET=33;
-	private static final byte ASCII_OFFSET=33;
-	public static boolean CHANGE_QUALITY=true; //Cap all quality values between MIN_CALLED_QUALITY and MAX_CALLED_QUALITY
-	public static byte MIN_CALLED_QUALITY=2;
-	public static byte MAX_CALLED_QUALITY=41;
-	public static byte MAX_MERGE_QUALITY=41;
 	public static boolean TO_UPPER_CASE=false;
 	public static boolean LOWER_CASE_TO_N=false;
-	public static final boolean OTHER_SYMBOLS_TO_N=true;
+	public static boolean DOT_DASH_X_TO_N=false;
 	public static boolean AVERAGE_QUALITY_BY_PROBABILITY=true;
 	public static boolean FIX_HEADER=false;
+	public static boolean ALLOW_NULL_HEADER=false;
+	public static boolean SKIP_SLOW_VALIDATION=false;
+	public static final boolean VALIDATE_BRANCHLESS=true;
+
+	public static final int IGNORE_JUNK=0;
+	public static final int FLAG_JUNK=1;
+	public static final int FIX_JUNK=2;
+	public static final int CRASH_JUNK=3;
+	public static final int FIX_JUNK_AND_IUPAC=4;
+	public static int JUNK_MODE=CRASH_JUNK;
+	public static boolean IUPAC_TO_N=false;
 	
-	public static boolean FLAG_JUNK=false;
-	public static boolean FIX_JUNK=false;
 	public static boolean U_TO_T=false;
 	public static boolean COMPRESS_MATCH_BEFORE_WRITING=true;
 	public static boolean DECOMPRESS_MATCH_ON_LOAD=true; //Set to false for some applications, like sorting, perhaps
 	
 	public static boolean ADD_BEST_SITE_TO_LIST_FROM_TEXT=true;
 	public static boolean NULLIFY_BROKEN_QUALITY=false;
+	public static boolean TOSS_BROKEN_QUALITY=false;
+	public static boolean FLAG_BROKEN_QUALITY=false;
 	public static boolean FLAT_IDENTITY=true;
 	public static boolean VALIDATE_IN_CONSTRUCTOR=true;
 	
 	public static boolean verbose=false;
+
+	/*--------------------------------------------------------------*/
+	
+	/** Offset for quality scores, normally 33, or 64 for some old Illumina data */
+	private static final byte ASCII_OFFSET=33;
+	
+	/** Allow quality scores to be changed, typically for corrupt Illumina data */
+	public static boolean CHANGE_QUALITY=true; //Cap all quality values between MIN_CALLED_QUALITY and MAX_CALLED_QUALITY
+	
+	/** Minimum allowed quality score for called (ACGT) bases */
+	private static byte MIN_CALLED_QUALITY=2;
+	
+	/** Maximum allowed quality score for called (ACGT) bases */
+	private static byte MAX_CALLED_QUALITY=41;
+	
+	/** Maximum allowed quality score for merged reads, which otherwise would normally be very high */
+	public static byte MAX_MERGE_QUALITY=41;
+	public static byte[] qMap=makeQmap(MIN_CALLED_QUALITY, MAX_CALLED_QUALITY);
+
+	public static byte MIN_CALLED_QUALITY(){return MIN_CALLED_QUALITY;}
+	public static byte MAX_CALLED_QUALITY(){return MAX_CALLED_QUALITY;}
+	
+	public static void setMaxCalledQuality(int x){
+		x=Tools.mid(1, x, 93);
+		if(x!=MAX_CALLED_QUALITY){
+			MAX_CALLED_QUALITY=(byte)x;
+			qMap=makeQmap(MIN_CALLED_QUALITY, MAX_CALLED_QUALITY);
+		}
+	}
+	
+	public static void setMinCalledQuality(int x){
+		x=Tools.mid(0, x, 93);
+		if(x!=MIN_CALLED_QUALITY){
+			MIN_CALLED_QUALITY=(byte)x;
+			qMap=makeQmap(MIN_CALLED_QUALITY, MAX_CALLED_QUALITY);
+		}
+	}
+
+	public static byte capQuality(long q){
+		return (byte)Tools.mid(MIN_CALLED_QUALITY, q, MAX_CALLED_QUALITY);
+	}
+
+	public static byte capQuality(byte q){
+		return qMap[q];
+	}
+	
+	public static byte capQuality(byte q, byte b){
+		return AminoAcid.isFullyDefined(b) ? qMap[q] : 0;
+	}
+	
+	private static byte[] makeQmap(byte min, byte max){
+		byte[] r=(qMap==null ? new byte[128] : qMap);
+		for(int i=0; i<r.length; i++){
+			r[i]=(byte) Tools.mid(min, i, max);
+		}
+		return r;
+	}
 }

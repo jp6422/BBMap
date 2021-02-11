@@ -10,12 +10,16 @@ qual
 scarf [input only]
 phylip [input only; only supported by phylip2fasta.sh]
 header [output only]
+oneline [tab delimited 2-column: name and bases]
+embl [input only]
+gbk [input only]
 
 The recognized compression extensions:
 
 gzip (gz) [can be accelerated by pigz]
 zip
-bz2 [requires bzip2 or pbzip2]
+bz2 [requires bzip2 or pbzip2 or lbzip2]
+fqz [requires fqz_comp]
 
 In order to stream using standard in or standard out, it is recommended to include the format.  For example:
 cat data.fq.gz | reformat.sh in=stdin.fq.gz out=stdout.fa > file.fa

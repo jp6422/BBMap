@@ -2,15 +2,16 @@ package tax;
 
 import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 
-import align2.Shared;
-import align2.Tools;
-import dna.Parser;
-import dna.Timer;
 import fileIO.FileFormat;
 import fileIO.ReadWrite;
 import fileIO.TextFile;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 import stream.Read;
 
 /**
@@ -31,8 +32,11 @@ public class IDTree {
 	 */
 	public static void main(String[] args){
 		Timer t=new Timer();
-		IDTree tree=new IDTree(args);
-		tree.process(t);
+		IDTree x=new IDTree(args);
+		x.process(t);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(x.outstream);
 	}
 	
 	/**
@@ -41,22 +45,13 @@ public class IDTree {
 	 */
 	public IDTree(String[] args){
 		
-		//Process any config files
-		args=Parser.parseConfig(args);
-		
-		//Detect whether the uses needs help
-		if(Parser.parseHelp(args, true)){
-			printOptions();
-			System.exit(0);
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
 		}
 		
-		//Print the program name and arguments
-		outstream.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
-		
-		boolean setInterleaved=false; //Whether interleaved was explicitly set.
-		
-		//Set some shared static variables regarding PIGZ
-		Shared.READ_BUFFER_LENGTH=Tools.min(200, Shared.READ_BUFFER_LENGTH);
+		//Set shared static variables
 		Shared.capBuffers(4);
 		ReadWrite.USE_PIGZ=ReadWrite.USE_UNPIGZ=true;
 		ReadWrite.MAX_ZIP_THREADS=Shared.threads();
@@ -72,14 +67,11 @@ public class IDTree {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if(b==null || b.equalsIgnoreCase("null")){b=null;}
-			while(a.startsWith("-")){a=a.substring(1);} //Strip leading hyphens
-			
 			
 			if(parser.parse(arg, a, b)){//Parse standard flags in the parser
 				//do nothing
 			}else if(a.equals("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 			}else if(a.equals("parse_flag_goes_here")){
 				//Set a variable here
 			}else{
@@ -102,10 +94,7 @@ public class IDTree {
 		}
 		
 		//Ensure there is an input file
-		if(in1==null){
-			printOptions();
-			throw new RuntimeException("Error - at least one input file is required.");
-		}
+		if(in1==null){throw new RuntimeException("Error - at least one input file is required.");}
 		
 		//Ensure output files can be written
 		if(!Tools.testOutputFiles(overwrite, append, false, out1)){
@@ -115,7 +104,7 @@ public class IDTree {
 		
 		//Ensure input files can be read
 		if(!Tools.testInputFiles(false, true, in1)){
-			throw new RuntimeException("\nCan't read to some input files.\n");
+			throw new RuntimeException("\nCan't read some input files.\n");  
 		}
 		
 		//Ensure that no file was specified multiple times
@@ -179,11 +168,6 @@ public class IDTree {
 	 * @return True if the reads should be kept, false if they should be discarded.
 	 */
 	boolean processReadPair(final Read r1, final Read r2){
-		throw new RuntimeException("TODO");
-	}
-	
-	/** This is called if the program runs with no parameters */
-	private void printOptions(){
 		throw new RuntimeException("TODO");
 	}
 	

@@ -1,24 +1,27 @@
 package pacbio;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Locale;
 
-import stream.ConcurrentReadInputStream;
-import stream.FastaReadInputStream;
-import stream.ConcurrentReadOutputStream;
-import stream.Read;
-import structures.ListNum;
-import align2.MultiStateAligner9PacBioAdapter;
-import align2.MultiStateAligner9PacBioAdapter2;
-import align2.ReadStats;
-import align2.Shared;
-import align2.Tools;
+import aligner.MultiStateAligner9PacBioAdapter;
+import aligner.MultiStateAligner9PacBioAdapter2;
 import dna.AminoAcid;
 import dna.Data;
-import dna.Parser;
-import dna.Timer;
-import fileIO.ReadWrite;
 import fileIO.FileFormat;
+import fileIO.ReadWrite;
+import shared.KillSwitch;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
+import stream.ConcurrentReadInputStream;
+import stream.ConcurrentReadOutputStream;
+import stream.FastaReadInputStream;
+import stream.Read;
+import structures.ListNum;
 
 /**
  * Increased sensitivity to nearby adapters.
@@ -29,11 +32,11 @@ import fileIO.FileFormat;
 public class RemoveAdapters2 {
 
 	public static void main(String[] args){
-		System.err.println("Executing "+(new Object() { }.getClass().getEnclosingClass().getName())+" "+Arrays.toString(args)+"\n");
-		
-		
-		
-		Timer t=new Timer();
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
 		
 		boolean verbose=false;
 
@@ -45,21 +48,17 @@ public class RemoveAdapters2 {
 		String outname2=null;
 		
 		String query=pacbioAdapter;
-		Shared.READ_BUFFER_LENGTH=Tools.min(Shared.READ_BUFFER_LENGTH, 20);
+		Shared.capBufferLen(20);
 		
-		boolean splitReads=false;
+		boolean splitReads=true;
 		
 		for(int i=0; i<args.length; i++){
 			final String arg=args[i];
 			final String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
-			String b=split.length>1 ? split[1] : "true";
-			if("null".equalsIgnoreCase(b)){b=null;}
-//			System.err.println("Processing "+args[i]);
+			String b=split.length>1 ? split[1] : null;
 			
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(Parser.parseCommonStatic(arg, a, b)){
+			if(Parser.parseCommonStatic(arg, a, b)){
 				//do nothing
 			}else if(Parser.parseZip(arg, a, b)){
 				//do nothing
@@ -69,6 +68,8 @@ public class RemoveAdapters2 {
 				//do nothing
 			}else if(a.equals("path") || a.equals("root") || a.equals("tempdir")){
 				Data.setPath(b);
+			}else if(a.equals("usealtmsa")){
+				USE_ALT_MSA=Parse.parseBoolean(b);
 			}else if(a.equals("fasta") || a.equals("in") || a.equals("input") || a.equals("in1") || a.equals("input1")){
 				in1=b;
 				if(b.indexOf('#')>-1){
@@ -80,26 +81,26 @@ public class RemoveAdapters2 {
 			}else if(a.equals("query") || a.equals("adapter")){
 				query=b;
 			}else if(a.equals("split")){
-				splitReads=Tools.parseBoolean(b);
+				splitReads=Parse.parseBoolean(b);
 			}else if(a.equals("plusonly")){
-				boolean x=Tools.parseBoolean(b);
+				boolean x=Parse.parseBoolean(b);
 				if(x){TRY_PLUS=true; TRY_MINUS=false;}
 			}else if(a.equals("minusonly")){
-				boolean x=Tools.parseBoolean(b);
+				boolean x=Parse.parseBoolean(b);
 				if(x){TRY_PLUS=false; TRY_MINUS=true;}
 			}else if(a.startsWith("mincontig")){
 				minContig=Integer.parseInt(b);
 			}else if(a.equals("append") || a.equals("app")){
-				append=ReadStats.append=Tools.parseBoolean(b);
+				append=ReadStats.append=Parse.parseBoolean(b);
 			}else if(a.equals("overwrite") || a.equals("ow")){
-				overwrite=Tools.parseBoolean(b);
+				overwrite=Parse.parseBoolean(b);
 				System.out.println("Set overwrite to "+overwrite);
 			}else if(a.equals("threads") || a.equals("t")){
-				if(b.equalsIgnoreCase("auto")){THREADS=Data.LOGICAL_PROCESSORS;}
+				if(b.equalsIgnoreCase("auto")){THREADS=Shared.LOGICAL_PROCESSORS;}
 				else{THREADS=Integer.parseInt(b);}
 				System.out.println("Set threads to "+THREADS);
 			}else if(a.equals("reads") || a.equals("maxreads")){
-				maxReads=Tools.parseKMG(b);
+				maxReads=Parse.parseKMG(b);
 			}else if(a.startsWith("outname") || a.startsWith("outfile") || a.equals("out")){
 				if(b==null || b.equalsIgnoreCase("null") || b.equalsIgnoreCase("none") || split.length==1){
 					System.out.println("No output file.");
@@ -120,7 +121,7 @@ public class RemoveAdapters2 {
 			}else if(a.equals("suspectratio")){
 				SUSPECT_RATIO=Float.parseFloat(b);
 			}else if(a.startsWith("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 			}else{
 				throw new RuntimeException("Unknown parameter: "+args[i]);
 			}
@@ -148,10 +149,10 @@ public class RemoveAdapters2 {
 		
 		ConcurrentReadOutputStream ros=null;
 		if(OUTPUT_READS){
-			final int buff=(!OUTPUT_ORDERED_READS ? THREADS : Tools.max(24, 2*THREADS));
+			final int buff=(!ordered ? THREADS : Tools.max(24, 2*THREADS));
 			
-			FileFormat ff1=FileFormat.testOutput(outname1, FileFormat.FASTQ, null, true, overwrite, append, OUTPUT_ORDERED_READS);
-			FileFormat ff2=FileFormat.testOutput(outname2, FileFormat.FASTQ, null, true, overwrite, append, OUTPUT_ORDERED_READS);
+			FileFormat ff1=FileFormat.testOutput(outname1, FileFormat.FASTQ, null, true, overwrite, append, ordered);
+			FileFormat ff2=FileFormat.testOutput(outname2, FileFormat.FASTQ, null, true, overwrite, append, ordered);
 			ros=ConcurrentReadOutputStream.getStream(ff1, ff2, buff, null, true);
 		}
 		process(cris, ros, query, splitReads);
@@ -249,26 +250,21 @@ public class RemoveAdapters2 {
 		System.out.println("Bad reads:               \t"+badReadsFound+"  \t("+totalAdapters+" adapters)");
 		System.out.println("Plus adapters:           \t"+plusAdaptersFound);
 		System.out.println("Minus adapters:          \t"+minusAdaptersFound);
-		System.out.println("Adapters per megabase:   \t"+String.format("%.3f",totalAdapters*1000000f/basesIn));
+		System.out.println("Adapters per megabase:   \t"+String.format(Locale.ROOT, "%.3f",totalAdapters*1000000f/basesIn));
 		if(readsOut>0){System.out.println("Reads Out:               \t"+readsOut+"  \t("+basesOut+" bases, avg length "+(basesOut/readsOut)+")");}
 		System.out.println();
 		if(truepositive>0 || truenegative>0 || falsepositive>0 || falsenegative>0){
 			System.out.println("Adapters Expected:       \t"+expected);
-			System.out.println("True Positive:           \t"+truepositive+" \t"+String.format("%.3f%%", truepositive*100f/expected));
-			System.out.println("True Negative:           \t"+truenegative+" \t"+String.format("%.3f%%", truenegative*100f/unexpected));
-			System.out.println("False Positive:          \t"+falsepositive+" \t"+String.format("%.3f%%", falsepositive*100f/unexpected));
-			System.out.println("False Negative:          \t"+falsenegative+" \t"+String.format("%.3f%%", falsenegative*100f/expected));
+			System.out.println("True Positive:           \t"+truepositive+" \t"+String.format(Locale.ROOT, "%.3f%%", truepositive*100f/expected));
+			System.out.println("True Negative:           \t"+truenegative+" \t"+String.format(Locale.ROOT, "%.3f%%", truenegative*100f/unexpected));
+			System.out.println("False Positive:          \t"+falsepositive+" \t"+String.format(Locale.ROOT, "%.3f%%", falsepositive*100f/unexpected));
+			System.out.println("False Negative:          \t"+falsenegative+" \t"+String.format(Locale.ROOT, "%.3f%%", falsenegative*100f/expected));
 		}
 		
 	}
 	
 	private static class ProcessThread extends Thread{
-
-		/**
-		 * @param cris
-		 * @param ros
-		 * @param mINIMUM_ALIGNMENT_SCORE_RATIO
-		 */
+		
 		public ProcessThread(ConcurrentReadInputStream cris_,
 				ConcurrentReadOutputStream ros_, float minRatio_, String query_, boolean split_) {
 			cris=cris_;
@@ -285,7 +281,7 @@ public class RemoveAdapters2 {
 			assert(window<ALIGN_COLUMNS);
 
 			msa=new MultiStateAligner9PacBioAdapter(ALIGN_ROWS, ALIGN_COLUMNS);
-			msa2=USE_ALT_MSA ? new MultiStateAligner9PacBioAdapter2(ALIGN_ROWS, ALIGN_COLUMNS) : null;
+			msa2=USE_ALT_MSA ? new MultiStateAligner9PacBioAdapter2() : null;
 
 			maxSwScore=msa.maxQuality(query1.length);
 			minSwScore=(int)(maxSwScore*MINIMUM_ALIGNMENT_SCORE_RATIO);
@@ -326,7 +322,7 @@ public class RemoveAdapters2 {
 					if(DONT_OUTPUT_BROKEN_READS){removeDiscarded(readlist);}
 					for(Read r : readlist){
 						if(r!=null){
-							r.obj=null;
+							r.obj=null;//Not sure what r.obj is here
 							assert(r.bases!=null);
 							if(r.sites!=null && r.sites.isEmpty()){r.sites=null;}
 						}
@@ -364,16 +360,16 @@ public class RemoveAdapters2 {
 		 * @param readlist
 		 * @return
 		 */
-		private ArrayList<Read> split(ArrayList<Read> in) {
+		private static ArrayList<Read> split(ArrayList<Read> in) {
 			ArrayList<Read> out=new ArrayList<Read>(in.size());
 			for(Read r : in){
 				if(r!=null){
 //					assert(r.mate==null);
-					if(!r.hasadapter()){out.add(r);}
+					if(!r.hasAdapter()){out.add(r);}
 					else{out.addAll(split(r));}
 					Read r2=r.mate;
 					if(r2!=null){
-						if(!r2.hasadapter()){out.add(r2);}
+						if(!r2.hasAdapter()){out.add(r2);}
 						else{out.addAll(split(r2));}
 					}
 				}
@@ -385,16 +381,16 @@ public class RemoveAdapters2 {
 		 * @param r
 		 * @return
 		 */
-		private ArrayList<Read> split(Read r) {
+		private static ArrayList<Read> split(Read r) {
 			ArrayList<Read> sections=new ArrayList<Read>();
 			
 			int lastX=-1;
 			for(int i=0; i<r.length(); i++){
 				if(r.bases[i]=='X'){
 					if(i-lastX>minContig){
-						byte[] b=Arrays.copyOfRange(r.bases, lastX+1, i);
-						byte[] q=r.quality==null ? null : Arrays.copyOfRange(r.quality, lastX+1, i);
-						Read r2=new Read(b, 0, -1, -1, r.id+"_"+(lastX+1), q, r.numericID, 0);
+						byte[] b=KillSwitch.copyOfRange(r.bases, lastX+1, i);
+						byte[] q=r.quality==null ? null : KillSwitch.copyOfRange(r.quality, lastX+1, i);
+						Read r2=new Read(b, q, r.id+"_"+(lastX+1), r.numericID);
 						sections.add(r2);
 					}
 					lastX=i;
@@ -402,9 +398,9 @@ public class RemoveAdapters2 {
 			}
 			int i=r.length();
 			if(i-lastX>minContig){
-				byte[] b=Arrays.copyOfRange(r.bases, lastX+1, i);
-				byte[] q=r.quality==null ? null : Arrays.copyOfRange(r.quality, lastX+1, i);
-				Read r2=new Read(b, 0, -1, -1, r.id+"_"+(lastX+1), q, r.numericID, 0);
+				byte[] b=KillSwitch.copyOfRange(r.bases, lastX+1, i);
+				byte[] q=r.quality==null ? null : KillSwitch.copyOfRange(r.quality, lastX+1, i);
+				Read r2=new Read(b, q, r.id+"_"+(lastX+1), r.numericID);
 				sections.add(r2);
 			}
 			return sections;
@@ -446,7 +442,7 @@ public class RemoveAdapters2 {
 						int stop=rvec[2];
 						assert(score>=minSwScoreSuspect);
 						if((i==0 || start>i) && (j==array.length-1 || stop<j)){
-							boolean kill=(score>=minSwScore || 
+							boolean kill=(score>=minSwScore ||
 									(score>=suspectMidpoint && lastSuspect>0 && start>=lastSuspect && start-lastSuspect<suspectDistance) ||
 									(lastConfirmed>0 && start>=lastConfirmed && start-lastConfirmed<suspectDistance));
 							
@@ -482,7 +478,7 @@ public class RemoveAdapters2 {
 						int start=rvec[1];
 						int stop=rvec[2];
 						if((i==0 || start>i) && (j==array.length-1 || stop<j)){
-							boolean kill=(score>=minSwScore || 
+							boolean kill=(score>=minSwScore ||
 									(score>=suspectMidpoint && lastSuspect>0 && start>=lastSuspect && start-lastSuspect<suspectDistance) ||
 									(lastConfirmed>0 && start>=lastConfirmed && start-lastConfirmed<suspectDistance));
 							
@@ -631,9 +627,9 @@ public class RemoveAdapters2 {
 	private static boolean overwrite=false;
 	/** Permission to append to existing files */
 	private static boolean append=false;
-	private static int THREADS=Data.LOGICAL_PROCESSORS;
+	private static int THREADS=Shared.LOGICAL_PROCESSORS;
 	private static boolean OUTPUT_READS=false;
-	private static boolean OUTPUT_ORDERED_READS=false;
+	private static boolean ordered=false;
 	private static boolean PERFECTMODE=false;
 	private static float MINIMUM_ALIGNMENT_SCORE_RATIO=0.31f; //0.31f: At 250bp reads, approx 0.01% false-positive and 94% true-positive.
 	private static float SUSPECT_RATIO=0.85F;

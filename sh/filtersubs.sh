@@ -1,16 +1,15 @@
 #!/bin/bash
-#filtersubs in=<infile>
 
 usage(){
 echo "
 Written by Brian Bushnell
-Last modified August 24, 2015
+Last modified April 3, 2020
 
 Description:  Filters a sam file to select only reads with substitution errors
 for bases with quality scores in a certain interval.  Used for manually 
 examining specific reads that may have incorrectly calibrated quality scores.
 
-Usage: filtersubs.sh in=<file> out=<file> minq=<number> maxq=<number>
+Usage:  filtersubs.sh in=<file> out=<file> minq=<number> maxq=<number>
 
 Parameters:
 in=<file>       Input sam or bam file.
@@ -18,12 +17,14 @@ out=<file>      Output file.
 minq=0          Keep only reads with substitutions of at least this quality.
 maxq=99         Keep only reads with substitutions of at most this quality.
 countindels=t   Also keep reads with indels in the quality range. 
+minsubs=1       Require at least this many substitutions.
 keepperfect=f   Also keep error-free reads.
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -38,7 +39,6 @@ popd > /dev/null
 CP="$DIR""current/"
 
 z="-Xmx120m"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -46,14 +46,15 @@ if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
 	exit
 fi
 
+calcXmx () {
+	source "$DIR""/calcmem.sh"
+	setEnvironment
+	parseXmx "$@"
+}
+calcXmx "$@"
+
 filtersubs() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-		module load samtools
-	fi
-	local CMD="java $EA $z -cp $CP jgi.FilterReadsWithSubs $@"
+	local CMD="java $EA $EOOM $z -cp $CP jgi.FilterReadsWithSubs $@"
 #	echo $CMD >&2
 	eval $CMD
 }

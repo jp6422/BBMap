@@ -1,16 +1,17 @@
 package jgi;
 
-import align2.Tools;
+import shared.Parse;
+import shared.Timer;
+import shared.Tools;
 import stream.Read;
 import stream.SamLine;
-import dna.AminoAcid;
-import dna.Timer;
+import template.BBTool_ST;
 
 /**
  * Filters to select only reads with substitution errors
  * for bases with quality scores in a certain interval.
- * Used for manually examining specific reads that may have 
- * incorrectly calibrated quality scores, for example. 
+ * Used for manually examining specific reads that may have
+ * incorrectly calibrated quality scores, for example.
  * @author Brian Bushnell
  * @date May 5, 2015
  *
@@ -38,16 +39,19 @@ public class FilterReadsWithSubs extends BBTool_ST {
 	public boolean parseArgument(String arg, String a, String b) {
 //		System.err.println("Calling parseArgument("+arg+","+a+","+b+")");
 		if(a.equals("minq")){
-			minq=(int)Tools.parseKMG(b);
+			minq=Parse.parseIntKMG(b);
 			return true;
 		}else if(a.equals("maxq")){
-			maxq=(int)Tools.parseKMG(b);
+			maxq=Parse.parseIntKMG(b);
 			return true;
 		}else if(a.equals("keepperfect")){
-			keepPerfect=Tools.parseBoolean(b);
+			keepPerfect=Parse.parseBoolean(b);
 			return true;
 		}else if(a.equals("countindels")){
-			countIndels=Tools.parseBoolean(b);
+			countIndels=Parse.parseBoolean(b);
+			return true;
+		}else if(a.equals("minsubs")){
+			minsubs=Integer.parseInt(b);
 			return true;
 		}
 		
@@ -55,7 +59,8 @@ public class FilterReadsWithSubs extends BBTool_ST {
 		return false;
 	}
 	
-	void setDefaults(){
+	@Override
+	protected void setDefaults(){
 		SamLine.SET_FROM_OK=true;
 		minq=0;
 		maxq=99;
@@ -65,19 +70,22 @@ public class FilterReadsWithSubs extends BBTool_ST {
 	}
 	
 	@Override
-	void startupSubclass() {}
+	protected final boolean useSharedHeader(){return true;}
 	
 	@Override
-	void shutdownSubclass() {}
+	protected void startupSubclass() {}
 	
 	@Override
-	void showStatsSubclass(Timer t, long readsIn, long basesIn) {
+	protected void shutdownSubclass() {}
+	
+	@Override
+	protected void showStatsSubclass(Timer t, long readsIn, long basesIn) {
 		// TODO Auto-generated method stub
 
 	}
 	
 	@Override
-	boolean processReadPair(Read r1, Read r2) {
+	protected boolean processReadPair(Read r1, Read r2) {
 		assert(r2==null);
 		final byte[] quals=r1.quality, bases=r1.bases;
 		final byte[] match=(r1.match==null ? null : !r1.shortmatch() ? r1.match : Read.toLongMatchString(r1.match));
@@ -113,7 +121,7 @@ public class FilterReadsWithSubs extends BBTool_ST {
 			subs+=sub;
 			indels+=indel;
 			if(q1>=minq && q1<=maxq){
-				if(sub>0 || (indel>0 && countIndels)){return true;}
+				if(sub>minsubs || (indel>0 && countIndels)){return true;}
 			}
 			
 			if(m!='D'){qpos++;}

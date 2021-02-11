@@ -1,6 +1,6 @@
 #!/bin/bash
 
-function usage(){
+usage(){
 echo "
 Written by Brian Bushnell
 Last modified July 27, 2015
@@ -9,7 +9,6 @@ Description:  Maps reads, then filters an assembly by contig coverage.
 Intended to reduce misassembly rate of SPAdes by removing suspicious contigs.
 
 Usage:  postfilter.sh in=<reads> ref=<contigs> out=<filtered contigs>
-
 
 Standard Parameters:
 in=<file>           File containing input reads.
@@ -37,10 +36,13 @@ tipsearch=0
 bw=20
 rescue=f
 
-
 Java Parameters:
--Xmx                This will be passed to Java to set memory usage, overriding the program's automatic memory detection.
-                    -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.  The max is typically 85% of physical memory.
+-Xmx                This will set Java's memory usage, overriding autodetection.
+                    -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.
+                    The max is typically 85% of physical memory.
+-eoom               This flag will cause the process to exit if an
+                    out-of-memory exception occurs.  Requires Java 8u92+.
+-da                 Disable assertions.
 
 Other parameters will be passed directly to BBMap.
 
@@ -48,6 +50,7 @@ Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -62,7 +65,6 @@ popd > /dev/null
 CP="$DIR""current/"
 
 z="-Xmx800m"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -72,6 +74,7 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 	if [[ $set == 1 ]]; then
 	return
@@ -83,14 +86,7 @@ calcXmx () {
 calcXmx "$@"
 
 function postfilter() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module unload samtools
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-		module load samtools
-	fi
-	local CMD="java $EA $z -cp $CP assemble.Postfilter $@"
+	local CMD="java $EA $EOOM $z -cp $CP assemble.Postfilter $@"
 	echo $CMD >&2
 	eval $CMD
 }

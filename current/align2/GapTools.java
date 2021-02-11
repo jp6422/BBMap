@@ -3,6 +3,8 @@ package align2;
 import java.util.ArrayList;
 import java.util.Arrays;
 
+import shared.Shared;
+import shared.Tools;
 import stream.SiteScore;
 
 public class GapTools {
@@ -188,6 +190,7 @@ public class GapTools {
 			b=b_;
 		}
 		
+		@Override
 		public int compareTo(Range r){
 			int x;
 			x=a-r.a;
@@ -195,13 +198,21 @@ public class GapTools {
 			return b-r.b;
 		}
 		
+		@Override
 		public String toString(){
 			return "("+a+","+b+")";
 		}
 
+		@Override
 		public boolean equals(Object other){return equals((Range)other);}
 		public boolean equals(Range other){return compareTo(other)==0;}
 		
+		@Override
+		public int hashCode() {
+			assert(false) : "This class should not be hashed.";
+			return super.hashCode();
+		}
+
 		public int a;
 		public int b;
 	}

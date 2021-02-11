@@ -12,6 +12,8 @@ import dna.FastaToChromArrays2;
 import fileIO.FileFormat;
 import fileIO.ReadWrite;
 import fileIO.SummaryFile;
+import shared.Shared;
+import shared.Tools;
 
 /**
  * @author Brian Bushnell
@@ -31,6 +33,10 @@ public class RefToIndex {
 		dir=dir.replace("ref/index/", "ref/genome/");
 		String sf=dir+"/summary.txt";
 		return sf;
+	}
+	
+	public static String bloomLoc(int build){
+		return Data.ROOT_INDEX+build+"/bloom.serial";
 	}
 	
 	public static void makeIndex(String reference, int build, PrintStream sysout, int keylen){
@@ -58,7 +64,7 @@ public class RefToIndex {
 				(System.nanoTime()&Long.MAX_VALUE)+"."+((args==null ? (reference==null ? "null" : reference) : args).hashCode()&Integer.MAX_VALUE)+".log";
 		dir=dir.replace("ref/index/", "ref/genome/");
 		String sf=dir+"/summary.txt";
-		if(!NODISK && new File(sf).exists() && SummaryFile.compare(sf, reference)){
+		if(FORCE_READ_ONLY || (!NODISK && new File(sf).exists() && SummaryFile.compare(sf, reference))){
 			//do nothing
 			if(LOG && !NODISK){
 				if(!new File(base).exists()){new File(base).mkdirs();}
@@ -148,6 +154,7 @@ public class RefToIndex {
 	public static boolean AUTO_CHROMBITS=true;
 	public static boolean LOG=false;
 	public static boolean NODISK=false;
+	public static boolean FORCE_READ_ONLY=false;
 	public static boolean overwrite=true;
 	public static boolean append=false;
 	public static boolean genScaffoldInfo=true;

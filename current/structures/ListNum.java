@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.Random;
 
+import shared.Shared;
 import stream.Read;
 
 public final class ListNum<K extends Serializable> implements Serializable, Iterable<K> {
@@ -29,6 +30,11 @@ public final class ListNum<K extends Serializable> implements Serializable, Iter
 	public final int size(){
 		return list==null ? 0 : list.size();
 	}
+	
+	@Override
+	public String toString(){return list==null ? "ln.list=null" : list.toString();}
+	
+	public final boolean isEmpty() {return list==null || list.isEmpty();}
 
 	public final K get(int i){return list.get(i);}
 	public final K set(int i, K k){return list.set(i, k);}
@@ -42,10 +48,15 @@ public final class ListNum<K extends Serializable> implements Serializable, Iter
 	public final ArrayList<K> list;
 	public final long id;
 	
+	public static synchronized void setDeterministicRandomSeed(long seed_){
+		if(seed_>=0){seed=seed_;}
+		else{seed=System.nanoTime()+(long)(Math.random()*10000000);}
+	}
+	
 	public static synchronized void setDeterministicRandom(boolean b){
 		GEN_RANDOM_NUMBERS=b;
 		if(b){
-			randy=new Random(seed);
+			randy=Shared.threadLocalRandom(seed);
 			seed++;
 		}
 	}

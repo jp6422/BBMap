@@ -1,20 +1,21 @@
 #!/bin/bash
 
-function usage(){
+usage(){
 echo "
 Written by Brian Bushnell
 Last modified February 17, 2015
 
 Description:  Displays contents of a text file.
+Start line and stop line are zero-based.  Start is inclusive,
+stop is exclusive.
 
-Usage:        textfile.sh <file> <start line> <stop line>
-
-Start line and stop line are zero-based.
+Usage:  textfile.sh <file> <start line> <stop line>
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -27,7 +28,6 @@ popd > /dev/null
 
 #DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/"
 CP="$DIR""current/"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -35,11 +35,15 @@ if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
 	exit
 fi
 
+calcXmx () {
+	source "$DIR""/calcmem.sh"
+	setEnvironment
+	parseXmx "$@"
+}
+calcXmx "$@"
+
 function tf() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module load oracle-jdk/1.7_64bit
-	fi
-	local CMD="java $EA -Xmx120m -cp $CP fileIO.TextFile $@"
+	local CMD="java $EA $EOOM -Xmx120m -cp $CP fileIO.TextFile $@"
 	echo $CMD >&2
 	eval $CMD
 }

@@ -8,8 +8,11 @@ import java.util.Arrays;
 import dna.AminoAcid;
 import dna.ChromosomeArray;
 import dna.Data;
-import dna.Timer;
 import fileIO.ReadWrite;
+import shared.KillSwitch;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 
 
 /**
@@ -20,11 +23,11 @@ import fileIO.ReadWrite;
 public class IndexMaker5 {
 	
 	
-	public static Block[] makeIndex(final int genome, int minChrom, int maxChrom, int k, int CHROMBITS, 
+	public static Block[] makeIndex(final int genome, int minChrom, int maxChrom, int k, int CHROMBITS,
 			int MAX_ALLOWED_CHROM_INDEX, int CHROM_MASK_LOW, int CHROM_MASK_HIGH, int SITE_MASK, int SHIFT_LENGTH, boolean WRITE, boolean DISK_INVALID, Block[] index){
 		Timer t=new Timer();
 		
-		MAX_CONCURRENT_BLOCKS=(Data.WINDOWS ? 1 : Tools.max(1, Shared.threads()/4));
+		MAX_CONCURRENT_BLOCKS=(Shared.WINDOWS ? 1 : Tools.max(1, Shared.threads()/4));
 		
 		minChrom=Tools.max(1, minChrom);
 		if(genome>=0 && Data.GENOME_BUILD!=genome){
@@ -72,7 +75,7 @@ public class IndexMaker5 {
 		return index;
 	}
 	
-	public static Block makeBlock(int minChrom, int maxChrom, int k, int CHROMBITS, int MAX_ALLOWED_CHROM_INDEX, 
+	public static Block makeBlock(int minChrom, int maxChrom, int k, int CHROMBITS, int MAX_ALLOWED_CHROM_INDEX,
 			int CHROM_MASK_LOW, int CHROM_MASK_HIGH, int SITE_MASK, int SHIFT_LENGTH, boolean WRITE, boolean DISK_INVALID, Block[] matrix){
 		assert(false) : maxChrom+", "+MAX_ALLOWED_CHROM_INDEX;
 		BlockMaker idm=new BlockMaker(minChrom, maxChrom, k, CHROMBITS, MAX_ALLOWED_CHROM_INDEX, CHROM_MASK_LOW, CHROM_MASK_HIGH, SITE_MASK, SHIFT_LENGTH, WRITE, DISK_INVALID, matrix);
@@ -96,7 +99,7 @@ public class IndexMaker5 {
 	private static class BlockMaker extends Thread{
 
 		public BlockMaker(int minChrom_, int maxChrom_, int k, int CHROMBITS_,
-				int MAX_ALLOWED_CHROM_INDEX_, int CHROM_MASK_LOW_, int CHROM_MASK_HIGH_, int SITE_MASK_, int SHIFT_LENGTH_, 
+				int MAX_ALLOWED_CHROM_INDEX_, int CHROM_MASK_LOW_, int CHROM_MASK_HIGH_, int SITE_MASK_, int SHIFT_LENGTH_,
 				boolean WRITE_TO_DISK_, boolean DISK_INVALID_, Block[] matrix_){
 			
 			KEYLEN=k;
@@ -127,7 +130,7 @@ public class IndexMaker5 {
 		}
 
 
-		private Block makeArrays(){
+		Block makeArrays(){
 			
 			{
 				String fname=fname(minChrom, maxChrom, KEYLEN, CHROMBITS);
@@ -157,7 +160,7 @@ public class IndexMaker5 {
 
 			CountThread threads[]=new CountThread[4];
 			int[] sizes=new int[KEYSPACE+1];
-			int[] intercom=new int[4];
+			int[] intercom=KillSwitch.allocInt1D(4);
 			Block[] indexHolder=new Block[1];
 
 			for(int i=0; i<4; i++){
@@ -447,10 +450,10 @@ public class IndexMaker5 {
 
 		public final int baseChrom(int chrom){return Tools.max(0, chrom&CHROM_MASK_HIGH);}
 
-		private final int KEYLEN;
+		final int KEYLEN;
 		private final int CHROMBITS;
 		private final int KEYSPACE;
-		private final int MAX_ALLOWED_CHROM_INDEX;
+		final int MAX_ALLOWED_CHROM_INDEX;
 		public final boolean WRITE_TO_DISK;
 		public final boolean DISK_INVALID;
 
@@ -459,8 +462,8 @@ public class IndexMaker5 {
 		private final int SITE_MASK;
 		private final int SHIFT_LENGTH;
 
-		private final int minChrom;
-		private final int maxChrom;
+		final int minChrom;
+		final int maxChrom;
 
 		private final Block[] matrix;
 
@@ -478,7 +481,7 @@ public class IndexMaker5 {
 		}
 	}
 	
-	private static void incrementActiveBlocks(int i){
+	static void incrementActiveBlocks(int i){
 		assert(i!=0);
 		synchronized(THREAD_SYNC){
 			assert(ACTIVE_BLOCKS>=0);
@@ -503,10 +506,10 @@ public class IndexMaker5 {
 	public static boolean verbose=false;
 
 	public static boolean USE_ALLOC_SYNC=false;
-	private static final String ALLOC_SYNC=new String("ALLOC_SYNC");
+	static final String ALLOC_SYNC=new String("ALLOC_SYNC");
 	private static final String THREAD_SYNC=new String("THREAD_SYNC");
 	
-	public static int MAX_CONCURRENT_BLOCKS=(Data.WINDOWS ? 1 : 2);
+	public static int MAX_CONCURRENT_BLOCKS=(Shared.WINDOWS ? 1 : 2);
 	private static int ACTIVE_BLOCKS=0;
 
 	public static boolean ALLOW_POLYMERS=false;

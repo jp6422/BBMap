@@ -1,26 +1,28 @@
 #!/bin/bash
-#reformat in=<infile> out=<outfile>
 
-function usage(){
+usage(){
 echo "
 Written by Brian Bushnell
-Last modified July 6, 2016
+Last modified March 24, 2020
 
 Description:  Estimates cardinality of unique kmers in sequence data.
+See also kmercountmulti.sh.
 
 Usage:  loglog.sh in=<file> k=<31>
 
+Parameters:
+in=<file>       (in1) Input file, or comma-delimited list of files.
+in2=<file>      ptional second file for paired reads.
+k=31            Use this kmer length for counting.
+buckets=2048    Use this many buckets for counting; higher decreases
+                variance, for large datasets.  Must be a power of 2.
+seed=-1         Use this seed for hash functions.  A negative number forces
+                a random seed.
+minprob=0       Set to a value between 0 and 1 to exclude kmers with a lower 
+                probability of being correct.
 
-Parameters and their defaults:
 
-in=<file>         (in1) Input file, or comma-delimited list of files.
-in2=<file>        Optional second file for paired reads.
-k=31              Use this kmer length for counting.
-buckets=1999      Use this many buckets for counting; higher decreases variance.
-bits=8            Hash this many bits per cycle.
-seed=-1           Use this seed for hash functions.  A negative number forces a random seed.
-
-Shortcuts: 
+Shortcuts:
 The # symbol will be substituted for 1 and 2.
 For example:
 loglog.sh in=read#.fq
@@ -28,17 +30,22 @@ loglog.sh in=read#.fq
 loglog.sh in1=read1.fq in2=read2.fq
 
 Java Parameters:
--Xmx              This will be passed to Java to set memory usage, overriding the program's automatic memory detection.
-                  -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.  The max is typically 85% of physical memory.
+-Xmx            This will set Java's memory usage, overriding autodetection.
+                -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.
+                    The max is typically 85% of physical memory.
+-eoom           This flag will cause the process to exit if an out-of-memory
+                exception occurs.  Requires Java 8u92+.
+-da             Disable assertions.
 
-Supported input formats are fastq, fasta, scarf, sam, and bam
-Supported compression formats are gzip, zip, and bz2
+Supported input formats are fastq, fasta, scarf, sam, and bam.
+Supported compression formats are gzip and bz2.
 To read from stdin, set 'in=stdin'.  The format should be specified with an extension, like 'in=stdin.fq.gz'
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -53,7 +60,6 @@ popd > /dev/null
 CP="$DIR""current/"
 
 z="-Xmx200m"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -63,19 +69,13 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 }
 calcXmx "$@"
 
 function loglog() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module unload samtools
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-		module load samtools
-	fi
-	local CMD="java $EA $z -cp $CP jgi.LogLog $@"
+	local CMD="java $EA $EOOM $z -cp $CP cardinality.LogLogWrapper $@"
 	echo $CMD >&2
 	eval $CMD
 }

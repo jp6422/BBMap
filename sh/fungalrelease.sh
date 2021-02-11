@@ -1,18 +1,16 @@
 #!/bin/bash
-#fungalrelease in=<infile> out=<outfile>
 
 usage(){
 echo "
 Written by Brian Bushnell
-Last modified December 10, 2015
+Last modified April 24, 2019
 
 Description:  Reformats a fungal assembly for release.
 Also creates contig and agp files.
 
 Usage:  fungalrelease.sh in=<input file> out=<output file>
 
-
-File parameters:
+I/O parameters:
 in=<file>           Input scaffolds.
 out=<file>          Output scaffolds.
 outc=<file>         Output contigs.
@@ -39,15 +37,19 @@ contignum=1         Number of first contig; only used if renamecontigs=t.
 minscaf=1           Only retain scaffolds at least this long.
 mincontig=1         Only retain contigs at least this long.
 
-
 Java Parameters:
--Xmx                This will be passed to Java to set memory usage, overriding the program's automatic memory detection.
-                    -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.  The max is typically 85% of physical memory.
+-Xmx                This will set Java's memory usage, overriding autodetection.
+                    -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.
+                    The max is typically 85% of physical memory.
+-eoom               This flag will cause the process to exit if an
+                    out-of-memory exception occurs.  Requires Java 8u92+.
+-da                 Disable assertions.
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -63,7 +65,6 @@ CP="$DIR""current/"
 
 z="-Xmx4g"
 z2="-Xms4g"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -73,6 +74,7 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 	if [[ $set == 1 ]]; then
 		return
@@ -81,12 +83,7 @@ calcXmx () {
 calcXmx "$@"
 
 fungalrelease() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-	fi
-	local CMD="java $EA $z -cp $CP jgi.FungalRelease $@"
+	local CMD="java $EOOM $EA $EOOM $z $z2 -cp $CP jgi.FungalRelease $@"
 	echo $CMD >&2
 	eval $CMD
 }

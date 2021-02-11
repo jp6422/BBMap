@@ -1,6 +1,7 @@
 package align2;
 
 import dna.ChromosomeArray;
+import shared.Shared;
 
 /**
  * @author Brian Bushnell

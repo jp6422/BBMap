@@ -2,23 +2,24 @@ package var;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 
-
 import dna.Data;
-import dna.Gene;
-import dna.Parser;
-import dna.Timer;
 import fileIO.TextStreamWriter;
-
-import align2.Tools;
+import shared.Parse;
+import shared.PreParser;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 
 public class StackVariations2 {
 	
 	public static void main(String[] args){
-		System.err.println("Executing "+(new Object() { }.getClass().getEnclosingClass().getName())+" "+Arrays.toString(args)+"\n");
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
 		
 		Timer t=new Timer();
 		
@@ -37,12 +38,11 @@ public class StackVariations2 {
 			final String arg=args[i];
 			final String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
-			String b=(split.length>1 ? split[1] : null);
+			String b=split.length>1 ? split[1] : null;
 			
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(a.equalsIgnoreCase("filter")){filter=true;}
-			else if(a.startsWith("filter")){
+			if(a.equalsIgnoreCase("filter")){
+				filter=true;
+			}else if(a.startsWith("filter")){
 				if(b.equals("1") || b.startsWith("t")){filter=true;}
 				else if(b.equals("0") || b.startsWith("f")){filter=false;}
 				else{throw new RuntimeException("Unknown parameter "+args[i]);}
@@ -66,7 +66,7 @@ public class StackVariations2 {
 			}else if(a.equals("blocksize")){
 				GenerateVarlets2.BLOCKSIZE=(Integer.parseInt(b));
 			}else if(a.equals("deletefiles") || a.startsWith("deletetemp") || a.startsWith("deleteinput") || a.equals("delete")){
-				DELETE_INPUT=(Tools.parseBoolean(b));
+				DELETE_INPUT=(Parse.parseBoolean(b));
 			}else{
 				throw new RuntimeException("Unknown parameter "+args[i]);
 			}
@@ -203,7 +203,7 @@ public class StackVariations2 {
 //				else{
 //					if(v.endDist<8){return false;}
 //					if(v.tailDist<14){return false;}
-//					
+//
 //					if(v.errors>0){return false;}
 //					if(v.expectedErrors>0.5f){return false;}
 ////					if(v.expectedErrors-v.errors>2f){return false;}
@@ -294,7 +294,7 @@ public class StackVariations2 {
 	public static ArrayList<Varlet> mergeAll(ArrayList<Varlet> vars){
 		if(vars==null || vars.size()==0){return null;}
 		ArrayList<Varlet> out=new ArrayList<Varlet>(8+vars.size()/16);
-		Collections.sort(vars);
+		Shared.sort(vars);
 		
 		ArrayList<Varlet> temp=new ArrayList<Varlet>(64);
 		for(int i=0; i<vars.size(); i++){
@@ -314,7 +314,7 @@ public class StackVariations2 {
 					if(result.numReads>MIN_READS_TO_KEEP){
 						out.add(result);
 					}else if(result.numReads==MIN_READS_TO_KEEP){
-						if(result.maxVarQuality()>=MIN_QUALITY_AT_MIN_READS && 
+						if(result.maxVarQuality()>=MIN_QUALITY_AT_MIN_READS &&
 								result.errors<=MAX_ERRORS_AT_MIN_READS &&
 								result.expectedErrors<=MAX_EXPECTED_ERRORS_AT_MIN_READS &&
 								(result.paired>0 || !REQUIRE_PAIRED_AT_MIN_READS)){
@@ -338,7 +338,7 @@ public class StackVariations2 {
 		}
 		
 		{//For testing
-			Collections.sort(out); //Should already be sorted...
+			Shared.sort(out); //Should already be sorted...
 			for(int i=1; i<out.size(); i++){
 				assert(!out.get(i).equals(out.get(i-1)));
 			}
@@ -425,7 +425,7 @@ public class StackVariations2 {
 			
 			pairedReads+=v.paired;
 			
-			if(v.strand==Gene.PLUS){
+			if(v.strand==Shared.PLUS){
 				ArrayList<Varlet> value=plus.get(v.readStart);
 				if(value==null){
 					numUniqueReads++;
@@ -452,7 +452,7 @@ public class StackVariations2 {
 		int netQuality=(int)Math.ceil((avgVarQuality+maxVarQuality)/2);
 		int netReadQuality=(int)Math.ceil((avgReadQuality+maxReadQuality)/2);
 		
-		Varlet v=new Varlet(bestVar.chromosome, ((plusReads1+plusReads2>0) && (minusReads1+minusReads2>0) ? Gene.PLUS : bestVar.strand), 
+		Varlet v=new Varlet(bestVar.chromosome, ((plusReads1+plusReads2>0) && (minusReads1+minusReads2>0) ? Shared.PLUS : bestVar.strand),
 				bestVar.beginLoc, bestVar.endLoc, bestVar.matchStart, bestVar.matchStop, bestVar.varType, bestVar.ref, bestVar.call,
 				netQuality, netReadQuality, maxMapScore, minErrors, minExpectedErrors, pairedReads, bestVar.readID, bestLen,
 				minReadStart, maxReadStop, numReads, maxHeadDist, maxTailDist, maxEndDist, bestVar.pairNum());
@@ -569,7 +569,7 @@ public class StackVariations2 {
 		private final int mergeAll2(ArrayList<Varlet> vars, TextStreamWriter tsw){
 			if(vars==null || vars.size()==0){return 0;}
 			
-			Collections.sort(vars);
+			Shared.sort(vars);
 			int out=0;
 			
 			ArrayList<Varlet> temp=new ArrayList<Varlet>(64);

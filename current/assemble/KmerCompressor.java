@@ -1,40 +1,38 @@
 package assemble;
 
-import java.io.File;
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
-import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
+import dna.AminoAcid;
+import fileIO.ByteFile;
+import fileIO.ByteStreamWriter;
+import fileIO.FileFormat;
+import fileIO.ReadWrite;
 import kmer.AbstractKmerTable;
 import kmer.AbstractKmerTableSet;
 import kmer.HashArray1D;
 import kmer.HashForest;
 import kmer.KmerNode;
 import kmer.KmerTableSet;
-
-import ukmer.Kmer;
-import ukmer.KmerTableSetU;
-
-import stream.ByteBuilder;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
+import sort.ContigLengthComparator;
+import sort.ReadLengthComparator;
 import stream.FastaReadInputStream;
-import stream.Read;
+import structures.ByteBuilder;
 import structures.IntList;
 import structures.LongList;
-import align2.ReadLengthComparator;
-import align2.ReadStats;
-import align2.Shared;
-import align2.Tools;
-import dna.AminoAcid;
-import dna.Parser;
-import dna.Timer;
-import fileIO.ByteFile;
-import fileIO.ByteStreamWriter;
-import fileIO.ReadWrite;
-import fileIO.FileFormat;
+import ukmer.Kmer;
+import ukmer.KmerTableSetU;
 
 
 /**
@@ -50,23 +48,19 @@ public class KmerCompressor {
 	 * @param args Command line arguments
 	 */
 	public static void main(String[] args){
-		
-		args=Parser.parseConfig(args);
-		if(Parser.parseHelp(args, true)){
-			printOptions();
-			System.exit(0);
-		}
-		
 		Timer t=new Timer(), t2=new Timer();
 		t.start();
 		t2.start();
 
-		final KmerCompressor wog=new KmerCompressor(args, true);
+		final KmerCompressor x=new KmerCompressor(args, true);
 		t2.stop();
 		outstream.println("Initialization Time:      \t"+t2);
 		
 		///And run it
-		wog.process(t);
+		x.process(t);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(outstream);
 	}
 	
 	public static final int preparseK(String[] args){
@@ -76,8 +70,6 @@ public class KmerCompressor {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if("null".equalsIgnoreCase(b)){b=null;}
-			while(a.charAt(0)=='-' && (a.indexOf('.')<0 || i>1 || !new File(a).exists())){a=a.substring(1);}
 			
 			if(a.equals("k")){
 				k=Integer.parseInt(b);
@@ -87,18 +79,17 @@ public class KmerCompressor {
 	}
 	
 	/**
-	 * Display usage information.
-	 */
-	protected static final void printOptions(){
-		outstream.println("Syntax:\nTODO");
-	}
-	
-	/**
 	 * Constructor.
 	 * @param args Command line arguments
 	 */
 	public KmerCompressor(String[] args, boolean setDefaults){
-		System.err.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
+
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
+		}
+		
 		k=preparseK(args);
 		
 		if(setDefaults){
@@ -106,8 +97,9 @@ public class KmerCompressor {
 			ReadWrite.ZIPLEVEL=8;
 			ReadWrite.USE_UNPIGZ=true;
 			ReadWrite.USE_PIGZ=true;
-			FastaReadInputStream.SPLIT_READS=false;
-			ByteFile.FORCE_MODE_BF2=Shared.threads()>2;
+			if(!ByteFile.FORCE_MODE_BF1 && !ByteFile.FORCE_MODE_BF2 && Shared.threads()>2){
+				ByteFile.FORCE_MODE_BF2=true;
+			}
 			AbstractKmerTableSet.defaultMinprob=0.5;
 		}
 		
@@ -117,12 +109,6 @@ public class KmerCompressor {
 		ArrayList<String> in2=new ArrayList<String>();
 		int fuse_=0;
 		
-		{
-			boolean b=false;
-			assert(b=true);
-			EA=b;
-		}
-		
 		/* Parse arguments */
 		for(int i=0; i<args.length; i++){
 
@@ -130,12 +116,8 @@ public class KmerCompressor {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if("null".equalsIgnoreCase(b)){b=null;}
-			while(a.charAt(0)=='-' && (a.indexOf('.')<0 || i>1 || !new File(a).exists())){a=a.substring(1);}
 			
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(Parser.parseCommonStatic(arg, a, b)){
+			if(Parser.parseCommonStatic(arg, a, b)){
 				//do nothing
 			}else if(Parser.parseZip(arg, a, b)){
 				//do nothing
@@ -166,43 +148,44 @@ public class KmerCompressor {
 			}else if(a.equals("out") || a.equals("contigs")){
 				outContigs=b;
 			}else if(a.equals("append") || a.equals("app")){
-				append=ReadStats.append=Tools.parseBoolean(b);
+				append=ReadStats.append=Parse.parseBoolean(b);
 			}else if(a.equals("overwrite") || a.equals("ow")){
-				overwrite=Tools.parseBoolean(b);
+				overwrite=Parse.parseBoolean(b);
 			}else if(a.equals("fuse")){
 				if(b==null || Character.isLetter(b.charAt(0))){
-					fuse_=Tools.parseBoolean(b) ? 100000 : 0;
+					fuse_=Parse.parseBoolean(b) ? 100000 : 0;
 				}else{
 					fuse_=Integer.parseInt(b);
 				}
 			}else if(a.equals("showstats") || a.equals("stats")){
-				showStats=Tools.parseBoolean(b);
+				showStats=Parse.parseBoolean(b);
 			}else if(a.equals("mincount") || a.equals("mincov") || a.equals("mindepth") || a.equals("min")){
-				minCount=(int)Tools.parseKMG(b);
+				minCount=Parse.parseIntKMG(b);
 			}else if(a.equals("maxcount") || a.equals("maxcov") || a.equals("maxdepth") || a.equals("max")){
-				maxCount=(int)Tools.parseKMG(b);
+				maxCount=Parse.parseIntKMG(b);
 			}else if(a.equals("requiresamecount") || a.equals("rsc") || a.equals("rsd")){
-				REQUIRE_SAME_COUNT=Tools.parseBoolean(b);
+				REQUIRE_SAME_COUNT=Parse.parseBoolean(b);
 			}else if(a.equals("threads") || a.equals("t")){
 				Shared.setThreads(b);
 			}else if(a.equals("buildthreads") || a.equals("bthreads") || a.equals("bt")){
+				assert(b!=null) : "Bad parameter: "+arg;
 				if(b.equalsIgnoreCase("auto")){
 					BUILD_THREADS=Shared.threads();
 				}else{
 					BUILD_THREADS=Integer.parseInt(b);
 				}
 			}else if(a.equals("showspeed") || a.equals("ss")){
-				showSpeed=Tools.parseBoolean(b);
+				showSpeed=Parse.parseBoolean(b);
 			}else if(a.equals("verbose")){
 //				assert(false) : "Verbose flag is currently static final; must be recompiled to change.";
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 			}else if(a.equals("verbose2")){
 //				assert(false) : "Verbose flag is currently static final; must be recompiled to change.";
-				verbose2=Tools.parseBoolean(b);
+				verbose2=Parse.parseBoolean(b);
 			}else if(a.equals("ilb") || a.equals("ignoreleftbranches") || a.equals("ignoreleftjunctions") || a.equals("ibb") || a.equals("ignorebackbranches")){
-				extendThroughLeftJunctions=Tools.parseBoolean(b);
+				extendThroughLeftJunctions=Parse.parseBoolean(b);
 			}else if(a.equals("rcomp")){
-				doRcomp=Tools.parseBoolean(b);
+				doRcomp=Parse.parseBoolean(b);
 			}
 			
 			else if(KmerTableSetU.isValidArgument(a)){
@@ -264,18 +247,10 @@ public class KmerCompressor {
 		
 		
 		if(showSpeed){
-
-			//Format with k or m suffixes
-			String rpstring=(readsIn<100000 ? ""+readsIn : readsIn<100000000 ? (readsIn/1000)+"k" : (readsIn/1000000)+"m");
-			String bpstring=(basesIn<100000 ? ""+basesIn : basesIn<100000000 ? (basesIn/1000)+"k" : (basesIn/1000000)+"m");
-
-			while(rpstring.length()<8){rpstring=" "+rpstring;}
-			while(bpstring.length()<8){bpstring=" "+bpstring;}
-			
 			outstream.println("\nTotal Time:               \t"+t);
 		}
 		
-		if(showStats && outContigs!=null && FileFormat.isFasta(ReadWrite.rawExtension(outContigs))){
+		if(showStats && outContigs!=null && FileFormat.isFasta(ReadWrite.rawExtension(outContigs)) && !FileFormat.isStdio(outContigs)){
 			outstream.println();
 			jgi.AssemblyStats2.main(new String[] {"in="+outContigs});
 		}
@@ -339,7 +314,7 @@ public class KmerCompressor {
 	 */
 	private final void buildContigs(){
 		
-		allContigs=new ArrayList<Read>();
+		allContigs=new ArrayList<Contig>();
 
 		tables.initializeOwnership();
 		
@@ -358,7 +333,7 @@ public class KmerCompressor {
 					e.printStackTrace();
 				}
 			}
-			for(Read contig : pt.contigs){
+			for(Contig contig : pt.contigs){
 				allContigs.add(contig);
 				contigsBuilt++;
 				basesBuilt+=contig.length();
@@ -378,11 +353,12 @@ public class KmerCompressor {
 			ByteStreamWriter bsw=new ByteStreamWriter(ff);
 			bsw.start();
 			if(allContigs!=null){
-//				Collections.sort(allContigs, ReadComparatorID.comparator);
-				Collections.sort(allContigs, ReadLengthComparator.comparator);
+//				Shared.sort(allContigs, ReadComparatorID.comparator);
+				ReadLengthComparator.comparator.setAscending(false);
+				Shared.sort(allContigs, ContigLengthComparator.comparator);
 				fuse(allContigs, fuse);
 				for(int i=0; i<allContigs.size(); i++){
-					Read r=allContigs.get(i);
+					Contig r=allContigs.get(i);
 					bsw.println(r);
 				}
 			}
@@ -390,24 +366,25 @@ public class KmerCompressor {
 		}
 	}
 	
-	private static void fuse(ArrayList<Read> contigs, int fuse){
+	private static void fuse(ArrayList<Contig> contigs, int fuse){
 		if(fuse<2){return;}
-		ArrayList<Read> temp=new ArrayList<Read>();
+		ArrayList<Contig> temp=new ArrayList<Contig>();
 		ByteBuilder bb=new ByteBuilder();
 		int num=0;
 		for(int i=0; i<contigs.size(); i++){
-			Read r=contigs.set(i, null);
+			Contig r=contigs.set(i, null);
 			if(bb.length()>0){bb.append('N');}
 			bb.append(r.bases);
 			if(bb.length()>=fuse){
-				Read fused=new Read(bb.toBytes(), -1, -1, -1, ""+num, null, num, 0);
+				Contig fused=new Contig(bb.toBytes(), num);
 				num++;
 				temp.add(fused);
 				bb.clear();
 			}
 		}
 		if(bb.length()>0){
-			Read fused=new Read(bb.toBytes(), -1, -1, -1, ""+num, null, num, 0);
+			Contig fused=new Contig(bb.toBytes(), num);
+			num++;
 			temp.add(fused);
 			bb.clear();
 		}
@@ -429,7 +406,7 @@ public class KmerCompressor {
 	}
 	
 	/**
-	 * Builds contigs. 
+	 * Builds contigs.
 	 */
 	private class BuildThread extends AbstractBuildThread{
 		
@@ -519,8 +496,8 @@ public class KmerCompressor {
 		
 		/** Returns length of new contig */
 		private int processKmer(long key){
-			byte[] contig=makeContig(key, builderT, true);
-			if(contig!=null){
+			byte[] bases=makeContig(key, builderT, true);
+			if(bases!=null){
 				final long num=contigNum.incrementAndGet();
 				final String id;
 				if(REQUIRE_SAME_COUNT){
@@ -529,10 +506,10 @@ public class KmerCompressor {
 					id=Long.toString(num);
 				}
 				
-				Read r=new Read(contig, -1, -1, -1, id, null, num, 0);
+				Contig r=new Contig(bases, id, (int)num);
 				contigs.add(r);
-				if(verbose){System.err.println("Added "+contig.length);}
-				return contig.length;
+				if(verbose){System.err.println("Added "+bases.length);}
+				return bases.length;
 			}else{
 				if(verbose){System.err.println("Created null contig.");}
 			}
@@ -635,7 +612,7 @@ public class KmerCompressor {
 		if(bb.length()<k){return BAD_SEED;}
 		final int shift=2*k;
 		final int shift2=shift-2;
-		final long mask=~((-1L)<<shift);
+		final long mask=(shift>63 ? -1L : ~((-1L)<<shift));
 		long kmer=0;
 		long rkmer=0;
 		int len=0;
@@ -751,7 +728,7 @@ public class KmerCompressor {
 		if(bb.length()<k){return BAD_SEED;}
 		final int shift=2*k;
 		final int shift2=shift-2;
-		final long mask=~((-1L)<<shift);
+		final long mask=(shift>63 ? -1L : ~((-1L)<<shift));
 		long kmer=0;
 		long rkmer=0;
 		int len=0;
@@ -863,7 +840,7 @@ public class KmerCompressor {
 	/*--------------------------------------------------------------*/
 	
 	/** Currently unused */
-	protected final Kmer getKmer(byte[] bases, int loc, Kmer kmer){
+	protected final static Kmer getKmer(byte[] bases, int loc, Kmer kmer){
 		kmer.clear();
 		for(int i=loc, lim=loc+kmer.k; i<lim; i++){
 			byte b=bases[i];
@@ -882,13 +859,13 @@ public class KmerCompressor {
 	private final long rcomp(long kmer){return AminoAcid.reverseComplementBinaryFast(kmer, k);}
 	private final long toValue(long kmer, long rkmer){return tables.toValue(kmer, rkmer);}
 	public final int getCount(long kmer, long rkmer){return tables.getCount(kmer, rkmer);}
-	private final boolean claim(long kmer, int id){return claim(kmer, rcomp(kmer), id);}
+	final boolean claim(long kmer, int id){return claim(kmer, rcomp(kmer), id);}
 	private final boolean claim(long kmer, long rkmer, int id){return tables.claim(kmer, rkmer, id);}
-	private final int findOwner(ByteBuilder bb, int id){return tables.findOwner(bb, id);}
-	private final void release(long key, int id){tables.release(key, id);}
+	final int findOwner(ByteBuilder bb, int id){return tables.findOwner(bb, id);}
+	final void release(long key, int id){tables.release(key, id);}
 	private final int fillRightCounts(long kmer, long rkmer, int[] counts, long mask, int shift2){return tables.fillRightCounts(kmer, rkmer, counts, mask, shift2);}
 	private final int fillRightCountsRcompOnly(long kmer, long rkmer, int[] counts, long mask, int shift2){return tables.fillRightCountsRcompOnly(kmer, rkmer, counts, mask, shift2);}
-	private final StringBuilder toText(long kmer){return AbstractKmerTable.toText(kmer, k);}
+	final StringBuilder toText(long kmer){return AbstractKmerTable.toText(kmer, k);}
 	
 	/*--------------------------------------------------------------*/
 	/*----------------            Fields            ----------------*/
@@ -897,22 +874,22 @@ public class KmerCompressor {
 	public final KmerTableSet tables;
 	
 	/** Normal kmer length */
-	private final int k;
+	final int k;
 	/** k-1; used in some expressions */
 	private final int k2;
 
-	private ArrayList<Read> allContigs;
+	private ArrayList<Contig> allContigs;
 	private long contigsBuilt=0;
 	private long basesBuilt=0;
 	private long longestContig=0;
 	
 	protected boolean extendThroughLeftJunctions=true;
 
-	private int minCount=1;
-	private int maxCount=Integer.MAX_VALUE;
+	int minCount=1;
+	int maxCount=Integer.MAX_VALUE;
 	
 	/** Only extend to kmers with the same count as this kmer */
-	private boolean REQUIRE_SAME_COUNT=false;
+	boolean REQUIRE_SAME_COUNT=false;
 	
 	public boolean showStats=true;
 	
@@ -953,9 +930,6 @@ public class KmerCompressor {
 	/*--------------------------------------------------------------*/
 	/*----------------       Final Primitives       ----------------*/
 	/*--------------------------------------------------------------*/
-	
-	/** True iff java was launched with the -ea' flag */
-	private final boolean EA;
 	
 	/** For numbering contigs */
 	final AtomicLong contigNum=new AtomicLong(0);

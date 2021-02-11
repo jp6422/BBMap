@@ -2,6 +2,9 @@ package align2;
 
 import java.util.Arrays;
 
+import shared.Shared;
+import shared.Tools;
+
 /**
  * @author Brian Bushnell
  * @date Aug 5, 2013
@@ -162,8 +165,8 @@ public abstract class BandedAligner {
 	
 	public static final int big=99999999;
 	public static boolean verbose=false;
-	/** Penalizes non-length-neutral alignments.  
-	 * This causes query-to-ref alignment to yield same score as ref-to-query alignment, which is useful for assertions.  */ 
+	/** Penalizes non-length-neutral alignments.
+	 * This causes query-to-ref alignment to yield same score as ref-to-query alignment, which is useful for assertions.  */
 	public static boolean penalizeOffCenter=true;
 	
 }

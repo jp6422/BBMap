@@ -3,9 +3,9 @@ import java.util.Arrays;
 import java.util.HashMap;
 
 import align2.QualityTools;
-import align2.Tools;
-
-import stream.Read;
+import shared.KillSwitch;
+import shared.Tools;
+import structures.ByteBuilder;
 
 
 /**
@@ -55,18 +55,46 @@ public final class AminoAcid {
 		codeStrings=bases;
 	}
 	
+	@Override
 	public String toString(){
 		return name+", "+symbol+", "+letter+", "+Arrays.toString(codeStrings);
 	}
 	
 	public static String kmerToString(long kmer, int k){
-		StringBuilder sb=new StringBuilder(k);
+		ByteBuilder sb=new ByteBuilder(k);
 		for(int i=0; i<k; i++){
 			int x=(int)(kmer&3);
 			sb.append((char)numberToBase[x]);
 			kmer>>=2;
 		}
 		return sb.reverse().toString();
+	}
+	
+	public static long stringToKmer(String s){
+		long kmer=0;
+		for(int i=0; i<s.length(); i++){
+			char c=s.charAt(i);
+			kmer=(kmer<<2)|(baseToNumber[c]);
+		}
+		return kmer;
+	}
+	
+	public static String kmerToStringAA(long kmer, int k){
+		ByteBuilder sb=new ByteBuilder(k);
+		for(int i=0; i<k; i++){
+			int x=(int)(kmer&31);
+			sb.append((char)numberToAcid[x]);
+			kmer>>=5;
+		}
+		return sb.reverse().toString();
+	}
+	
+	public static final String codonToString(int codon){
+		return codon>=0 && codon<codonToString.length ? codonToString[codon] : "NNN";
+	}
+	
+	public String canonicalCodon(){
+		return codeStrings[0];
 	}
 	
 	
@@ -95,9 +123,13 @@ public final class AminoAcid {
 //	X 	masked
 //	- 	gap of indeterminate length
 	
+	public static final String[] canonicalCodons=new String[21];
+
 	public static final byte[] numberToBase={
 		'A','C','G','T','N'
 	};
+	
+	public static final byte[] numberToAcid=new byte[21];
 	
 	public static final byte[] numberToComplementaryBase={
 		'T','G','C','A','N'
@@ -132,11 +164,52 @@ public final class AminoAcid {
 		'X',' ',' ',' ',' ',' ',' ',' ', //16-23
 	};
 	
+	/** Element i is: N-bit code for a symbol, -1 otherwise */
+	public static final byte[] symbolToNumber(boolean amino){
+		return amino ? acidToNumber : baseToNumber;
+	}
+	
+	/** Element i is: N-bit code for a symbol, 0 otherwise */
+	public static final byte[] symbolToNumber0(boolean amino){
+		return amino ? acidToNumber0 : baseToNumber0;
+	}
+	
+	/** Element i is: N-bit code for a symbol, -1 otherwise */
+	public static final byte[] symbolToComplementNumber(boolean amino){
+		return amino ? acidToNumber : baseToComplementNumber;
+	}
+	
+	/** Element i is: N-bit code for a symbol, 0 otherwise */
+	public static final byte[] symbolToComplementNumber0(boolean amino){
+		return amino ? acidToNumber0 : baseToComplementNumber0;
+	}
+	
+	/** Element i is: 5-bit alphabetical code for a symbol, -1 otherwise */
+	public static final byte[] acidToNumber=new byte[128];
+	
+	/** Element i is: 5-bit alphabetical code for a symbol other than stop, -1 otherwise */
+	public static final byte[] acidToNumberNoStops=new byte[128];
+	
+	/** Element i is: 5-bit alphabetical code for a symbol, 0 otherwise */
+	public static final byte[] acidToNumber0=new byte[128];//Rename acidToNumber0
+	
+	/** Element i is: 5-bit alphabetical code for a symbol (plus X, B, J, Z, . and -), -1 otherwise */
+	public static final byte[] acidToNumberExtended=new byte[128];
+	
+	/** Element i is: 5-bit alphabetical code for a symbol, -1 otherwise */
+	public static final byte[] acidToNumber8=new byte[128];
+	
 	/** Element i is: 0 for 'A', 1 for 'C', 2 for 'G', 3 for 'T', -1 otherwise */
 	public static final byte[] baseToNumber=new byte[128];
+
+	/** Element i is: 0 for 'A', 1 for 'C', 2 for 'G', 3 for 'T', 0 otherwise */
+	public static final byte[] baseToNumber0=new byte[128];
 	
 	/** Element i is: 3 for 'A', 2 for 'C', 1 for 'G', 0 for 'T', -1 otherwise */
 	public static final byte[] baseToComplementNumber=new byte[128];
+	
+	/** Element i is: 3 for 'A', 2 for 'C', 1 for 'G', 0 for 'T', 0 otherwise */
+	public static final byte[] baseToComplementNumber0=new byte[128];
 	
 	/** Element i is: 0 for 'A', 1 for 'C', 2 for 'G', 3 for 'T', 4 for 'N', -1 otherwise */
 	public static final byte[] baseToNumberACGTN=new byte[128];
@@ -151,11 +224,27 @@ public final class AminoAcid {
 	public static final byte[] baseToACGTN=new byte[128];
 	
 	public static final byte[] baseToComplementExtended=new byte[128];
+
+	public static final String[] codonToString=new String[64];
 	
 	/** Uracil to Thymine, everything else unchanged */
 	public static final byte[] uToT=new byte[256];
+	/** Thymine to Uracil, everything else unchanged */
+	public static final byte[] tToU=new byte[256];
+	/** . - X to N, everything else unchanged */
+	public static final byte[] dotDashXToNocall=new byte[256];
+	/** . - X to ., everything else unchanged */
+	public static final byte[] dotDashXToNocallAA=new byte[256];
+	/** Letters to uppercase, everything else unchanged */
+	public static final byte[] toUpperCase=new byte[256];
+	/** Lowercase to N, everything else unchanged */
+	public static final byte[] lowerCaseToNocall=new byte[256];
+	/** Lowercase to ., everything else unchanged */
+	public static final byte[] lowerCaseToNocallAA=new byte[256];
+	/** Non-acgtACGT alphabet letters to N */
+	public static final byte[] iupacToNocall=new byte[256];
 	
-	/** Element i is the bitwise OR of constituent IUPAC base numbers in baseToNumber.<br> 
+	/** Element i is the bitwise OR of constituent IUPAC base numbers in baseToNumber.<br>
 	 * For example, baseToNumberExtended['M'] = (baseToNumber['A'] | baseToNumber['C']) = (1 | 2) = 3 <br>
 	 * Invalid characters are -1 */
 	public static final byte[] baseToNumberExtended=new byte[128];
@@ -189,7 +278,7 @@ public final class AminoAcid {
 	public static final AminoAcid END=new AminoAcid("End, End, *, UAA, UGA, UAG");
 	public static final AminoAcid ANY=new AminoAcid("Any, Any, X, XXX");
 	
-	
+	public static int AMINO_SHIFT=5;
 
 
 	public static final byte[][] COLORS=new byte[][] {
@@ -212,6 +301,16 @@ public final class AminoAcid {
 
 	public static final void reverseComplementBasesInPlace(final byte[] in){
 		if(in!=null){reverseComplementBasesInPlace(in, in.length);}
+	}
+	public static final void complementBasesInPlace(final byte[] in){
+		if(in==null){return;}
+		complementBasesInPlace(in, in.length);
+	}
+	public static final void complementBasesInPlace(final byte[] in, final int length){
+		if(in==null){return;}
+		for(int i=0; i<length; i++){
+			in[i]=baseToComplementExtended[in[i]];
+		}
 	}
 	
 	public static final void reverseComplementBasesInPlace(final byte[] in, final int length){
@@ -303,9 +402,9 @@ public final class AminoAcid {
 		return numberToBase[COLORS[a][color]];
 	}
 	
-	public static final byte toNumber(String code){
-		return toNumber(code.charAt(0), code.charAt(1), code.charAt(2));
-	}
+//	public static final byte toNumber(String code){
+//		return toNumber(code.charAt(0), code.charAt(1), code.charAt(2));
+//	}
 	
 	public static final AminoAcid toAA(String code){
 		return toAA(code.charAt(0), code.charAt(1), code.charAt(2));
@@ -335,7 +434,7 @@ public final class AminoAcid {
 	
 	public static final byte[] numberToBases(int code, int n){
 		
-		byte[] bytes=new byte[n];
+		byte[] bytes=KillSwitch.allocByte1D(n);
 		
 		for(int i=n-1; i>=0; i--){
 			int temp=code&3;
@@ -364,6 +463,14 @@ public final class AminoAcid {
 	
 	public static boolean isFullyDefined(byte base){
 		return base>=0 && baseToNumber[base]>=0;
+	}
+	
+	public static boolean isFullyDefinedAA(byte acid){
+		return acid>=0 && acidToNumber[acid]>=0;
+	}
+	
+	public static boolean isFullyDefinedAANoStops(byte acid){
+		return acid>=0 && acidToNumberNoStops[acid]>=0;
 	}
 	
 	public static boolean isACGTN(char base){
@@ -423,6 +530,26 @@ public final class AminoAcid {
 		return x;
 	}
 	
+	public static int countDefined(byte[] s){
+		if(s==null){return 0;}
+		int x=0;
+		for(int i=0; i<s.length; i++){
+			if(isFullyDefined(s[i])){x++;}
+		}
+		return x;
+	}
+
+	public static final byte toNumber(String s){
+		assert(s.length()==3);
+		int num=0;
+		for(int i=0; i<3; i++){
+			char c=s.charAt(i);
+			int x=baseToNumber[c];
+			if(x<0){return (byte)-1;}
+			num=(num<<2)|x;
+		}
+		return (byte)num;
+	}
 	
 	public static final byte toNumber(char c1, char c2, char c3){
 		assert(baseToNumberACGTN2[c1]>=0 && baseToNumberACGTN2[c2]>=0 && baseToNumberACGTN2[c3]>=0);
@@ -444,7 +571,7 @@ public final class AminoAcid {
 	
 	public static final byte toByte(byte c1, byte c2, byte c3){
 		int a=baseToNumber[c1], b=baseToNumber[c2], c=baseToNumber[c3];
-		if(a<0 || b<0 || c<0){return (byte)'.';}
+		if(a<0 || b<0 || c<0){return (byte)'X';}
 		int x=((a<<4)|(b<<2)|c);
 		return codeToByte[x];
 	}
@@ -516,8 +643,22 @@ public final class AminoAcid {
 		final int stop=frame+blen;
 		final int alen=blen/3;
 		
-		byte[] out=new byte[alen];
+		byte[] out=KillSwitch.allocByte1D(alen);
 		for(int i=2+frame, j=0; i<stop; i+=3, j++){
+			byte a=toByte(bases[i-2], bases[i-1], bases[i]);
+			out[j]=a;
+		}
+		return out;
+	}
+	
+	public static final byte[] toAAs(byte[] bases, int start, int stop){
+		if(bases==null){return null;}
+		stop-=2;
+		final int blen=stop-start;
+		final int alen=blen/3;
+		
+		byte[] out=KillSwitch.allocByte1D(alen);
+		for(int i=2+start, j=0; i<stop; i+=3, j++){
 			byte a=toByte(bases[i-2], bases[i-1], bases[i]);
 			out[j]=a;
 		}
@@ -532,7 +673,7 @@ public final class AminoAcid {
 		final int stop=frame+blen;
 		final int alen=blen/3;
 		
-		byte[] out=new byte[alen];
+		byte[] out=KillSwitch.allocByte1D(alen);
 		for(int i=2+frame, j=0; i<stop; i+=3, j++){
 			byte qa=quals[i-2], qb=quals[i-1], qc=quals[i];
 			float pa=QualityTools.PROB_CORRECT[qa], pb=QualityTools.PROB_CORRECT[qb], pc=QualityTools.PROB_CORRECT[qc];
@@ -554,7 +695,7 @@ public final class AminoAcid {
 		final int alen=aminos.length;
 		final int blen=alen*3;
 		
-		final byte[] out=new byte[blen];
+		final byte[] out=KillSwitch.allocByte1D(blen);
 		for(int i=0, j=0; i<alen; i++, j+=3){
 			int code=aminoToCode[aminos[i]];
 			out[j+2]=numberToBase[(code&3)];
@@ -581,6 +722,33 @@ public final class AminoAcid {
 		uToT['u']='t';
 		uToT['U']='T';
 		
+		for(int i=0; i<tToU.length; i++){tToU[i]=(byte)i;}
+		tToU['t']='u';
+		tToU['T']='U';
+		
+		for(int i=0; i<dotDashXToNocall.length; i++){
+			dotDashXToNocall[i]=(byte)i;
+			iupacToNocall[i]=(byte)i;
+		}
+		dotDashXToNocall['.']='N';
+		dotDashXToNocall['-']='N';
+		dotDashXToNocall['X']='N';
+		dotDashXToNocall['x']='N';
+		dotDashXToNocall['n']='N';
+		
+		for(int i=0; i<dotDashXToNocallAA.length; i++){dotDashXToNocallAA[i]=(byte)i;}
+		dotDashXToNocallAA['.']='X';
+		dotDashXToNocallAA['-']='X';
+		dotDashXToNocallAA['X']='X';
+		dotDashXToNocallAA['x']='X';
+		
+		for(int i=0; i<toUpperCase.length; i++){
+			toUpperCase[i]=(byte) ((i>='a' && i<='z') ? i-32 : i);
+			lowerCaseToNocall[i]=((i>='a' && i<='z') ? (byte)'N' : (byte)i);
+			lowerCaseToNocallAA[i]=((i>='a' && i<='z') ? (byte)'.' : (byte)i);
+		}
+		
+		
 		Arrays.fill(baseToACGTN, (byte)'N');
 		
 		Arrays.fill(baseToNumberExtended, (byte)-1);
@@ -588,7 +756,7 @@ public final class AminoAcid {
 			char x=(char)numberToBaseExtended[i];
 			if(!Character.isWhitespace(x)){
 				baseToNumberExtended[x]=(byte)i;
-				baseToNumberExtended[Character.toLowerCase(x)]=(byte)i;
+				baseToNumberExtended[Tools.toLowerCase(x)]=(byte)i;
 			}
 		}
 		baseToNumberExtended['U']=8;
@@ -600,8 +768,8 @@ public final class AminoAcid {
 			char x=(char)numberToBase[i];
 			if(!Character.isWhitespace(x)){
 				baseToNumberACGTN[x]=baseToNumberACGTother[x]=(byte)i;
-				baseToNumberACGTN[Character.toLowerCase(x)]=baseToNumberACGTother[Character.toLowerCase(x)]=(byte)i;
-				baseToACGTN[x]=baseToACGTN[Character.toLowerCase(x)]=(byte)x;
+				baseToNumberACGTN[Tools.toLowerCase(x)]=baseToNumberACGTother[Tools.toLowerCase(x)]=(byte)i;
+				baseToACGTN[x]=baseToACGTN[Tools.toLowerCase(x)]=(byte)x;
 			}
 		}
 		baseToNumberACGTN['U']=baseToNumberACGTN['u']=3;
@@ -611,17 +779,18 @@ public final class AminoAcid {
 		for(int i=0; i<baseToNumberACGTN.length; i++){baseToNumberACGTN2[i]=baseToNumberACGTN[i];}
 		baseToNumberACGTN2['N']=0;
 		baseToNumberACGTN2['n']=0;
-		
+
 		Arrays.fill(baseToNumber, (byte)-1);
+		Arrays.fill(baseToNumber0, (byte)0);
 		for(int i=0; i<numberToBase.length; i++){
 			char x=(char)numberToBase[i];
 			if(x=='A' || x=='C' || x=='G' || x=='T'){
-				baseToNumber[x]=(byte)i;
-				baseToNumber[Character.toLowerCase(x)]=(byte)i;
+				baseToNumber0[x]=baseToNumber[x]=(byte)i;
+				baseToNumber0[Tools.toLowerCase(x)]=baseToNumber[Tools.toLowerCase(x)]=(byte)i;
 			}
 		}
-		baseToNumber['U']=3;
-		baseToNumber['u']=3;
+		baseToNumber0['U']=baseToNumber['U']=3;
+		baseToNumber0['u']=baseToNumber['u']=3;
 		
 		Arrays.fill(baseToComplementNumber, (byte)-1);
 		baseToComplementNumber['A']=baseToComplementNumber['a']=3;
@@ -629,13 +798,26 @@ public final class AminoAcid {
 		baseToComplementNumber['G']=baseToComplementNumber['g']=1;
 		baseToComplementNumber['T']=baseToComplementNumber['t']=0;
 		baseToComplementNumber['U']=baseToComplementNumber['u']=0;
+
+		Arrays.fill(baseToComplementNumber0, (byte)0);
+		baseToComplementNumber0['A']=baseToComplementNumber0['a']=3;
+		baseToComplementNumber0['C']=baseToComplementNumber0['c']=2;
+		baseToComplementNumber0['G']=baseToComplementNumber0['g']=1;
+		baseToComplementNumber0['T']=baseToComplementNumber0['t']=0;
+		baseToComplementNumber0['U']=baseToComplementNumber0['u']=0;
 		
-		Arrays.fill(baseToComplementExtended, (byte)-1);
+		//Invalid symbols are unchanged.
+		//This prevents crashes from -1 being out of bounds, and allows
+		//consecutive rcomp operations to restore the original sequence.
+		for(int i=0; i<baseToComplementExtended.length; i++){
+			baseToComplementExtended[i]=(byte)i;
+		}
+//		Arrays.fill(baseToComplementExtended, (byte)-1);
 		for(int i=0; i<numberToBaseExtended.length; i++){
 			char x=(char)numberToBaseExtended[i];
 			char x2=(char)numberToComplementaryBaseExtended[i];
 			baseToComplementExtended[x]=(byte)x2;
-			baseToComplementExtended[Character.toLowerCase(x)]=(byte)Character.toLowerCase(x2);
+			baseToComplementExtended[Tools.toLowerCase(x)]=(byte)Tools.toLowerCase(x2);
 		}
 		baseToComplementExtended['U']=(byte)'A';
 		baseToComplementExtended['u']=(byte)'a';
@@ -668,10 +850,20 @@ public final class AminoAcid {
 		AlphabeticalAAs[19]=Valine;
 		AlphabeticalAAs[20]=END;
 //		AlphabeticalAAs[21]=ANY;
-		
+
 		Arrays.fill(aminoToCode, (byte)-1);
+		Arrays.fill(acidToNumber, (byte)-1);
+		Arrays.fill(acidToNumber0, (byte)0);
+		Arrays.fill(acidToNumber8, (byte)-1);
 		for(int i=0; i<AlphabeticalAAs.length; i++){
 			AminoAcid aa=AlphabeticalAAs[i];
+			
+			acidToNumber[aa.letter]=(byte)i;
+			acidToNumber[Tools.toLowerCase(aa.letter)]=(byte)i;
+			acidToNumber0[aa.letter]=(byte)i;
+			acidToNumber0[Tools.toLowerCase(aa.letter)]=(byte)i;
+			numberToAcid[i]=(byte)aa.letter;
+			canonicalCodons[i]=aa.canonicalCodon();
 			
 			stringToAA.put(aa.name, aa);
 			stringToAA.put(aa.symbol, aa);
@@ -689,11 +881,39 @@ public final class AminoAcid {
 				codeToByte[x]=(byte)(aa.letter);
 				if(j==0){
 					aminoToCode[aa.letter]=(byte)x;
-					aminoToCode[Character.toLowerCase(aa.letter)]=(byte)x;
+					aminoToCode[Tools.toLowerCase(aa.letter)]=(byte)x;
 				}
 			}
 		}
-		aminoToCode['X']=aminoToCode['x']=65;
+		
+		for(int i=0; i<acidToNumberNoStops.length; i++){acidToNumberNoStops[i]=acidToNumber[i];}
+		acidToNumberNoStops[END.letter]=-1;
+
+		for(int i=0; i<acidToNumber.length; i++){
+			acidToNumberExtended[i]=acidToNumber[i];
+		}
+		
+		{
+			byte anySym=(byte)(Tools.max(acidToNumberExtended)+1);
+			byte dash=(byte)(anySym+1);
+			acidToNumberExtended['x']=acidToNumberExtended['X']=acidToNumberExtended['.']=anySym;
+			acidToNumberExtended['b']=acidToNumberExtended['B']=anySym;
+			acidToNumberExtended['z']=acidToNumberExtended['Z']=anySym;
+			acidToNumberExtended['j']=acidToNumberExtended['J']=anySym;
+			acidToNumberExtended['-']=dash;
+		}
+		
+		acidToNumber8['H']=acidToNumber8['K']=acidToNumber8['R']=0;
+		acidToNumber8['D']=acidToNumber8['E']=1;
+		acidToNumber8['S']=acidToNumber8['T']=acidToNumber8['N']=acidToNumber8['Q']=2;
+		acidToNumber8['A']=acidToNumber8['V']=acidToNumber8['L']=acidToNumber8['I']=acidToNumber8['M']=3;
+		acidToNumber8['F']=acidToNumber8['Y']=acidToNumber8['W']=4;
+		acidToNumber8['P']=acidToNumber8['G']=5;
+		acidToNumber8['C']=acidToNumber8['*']=6;
+		acidToNumber8['B']=acidToNumber8['Z']=7;
+
+		aminoToCode['X']=aminoToCode['x']=aminoToCode['B']=aminoToCode['b']=
+				aminoToCode['Z']=aminoToCode['z']=aminoToCode['J']=aminoToCode['j']=65;
 		codeToAA[65]=ANY;
 		codeToChar[65]='X';
 		codeToByte[65]='X';
@@ -711,6 +931,16 @@ public final class AminoAcid {
 			AminoAcid aa=stringToAA.get(s);
 			assert(aa!=null);
 			stringToAA.put(s.toLowerCase(), aa);
+		}
+		
+		for(int i=0; i<codonToString.length; i++){
+			codonToString[i]=kmerToString(i, 3);
+		}
+		
+		for(int i='A'; i<='z'; i++){
+			if(baseToNumber[i]<0 && baseToNumberExtended[i]>=0){
+				iupacToNocall[i]='N';
+			}
 		}
 		
 	}

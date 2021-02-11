@@ -4,33 +4,32 @@ import java.io.File;
 import java.io.PrintStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.TimeZone;
 
-import stream.ConcurrentGenericReadInputStream;
-import stream.ConcurrentReadInputStream;
-import stream.FASTQ;
-import stream.FastaReadInputStream;
-import stream.ConcurrentReadOutputStream;
-import stream.Read;
-import structures.ListNum;
+import align2.BBMap;
+import assemble.Tadpole;
 import dna.Data;
-import dna.Parser;
-import dna.Timer;
 import driver.RenameAndMux;
 import fileIO.ByteFile;
 import fileIO.ByteFile1;
 import fileIO.ByteFile2;
-import fileIO.ReadWrite;
 import fileIO.FileFormat;
+import fileIO.ReadWrite;
 import fileIO.TextFile;
-
-import align2.BBMap;
-import align2.ReadStats;
-import align2.Shared;
-import align2.Tools;
-import assemble.Tadpole;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
+import stream.ConcurrentGenericReadInputStream;
+import stream.ConcurrentReadInputStream;
+import stream.ConcurrentReadOutputStream;
+import stream.FastaReadInputStream;
+import stream.Read;
+import structures.ListNum;
 
 /**
  * @author Brian Bushnell
@@ -45,26 +44,21 @@ public class DecontaminateByNormalization {
 
 	public static void main(String[] args){
 		Timer t=new Timer();
-		DecontaminateByNormalization dbn=new DecontaminateByNormalization(args);
-		dbn.process(t);
+		DecontaminateByNormalization x=new DecontaminateByNormalization(args);
+		x.process(t);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(x.outstream);
 	}
 	
 	public DecontaminateByNormalization(String[] args){
 		
-		args=Parser.parseConfig(args);
-		if(Parser.parseHelp(args, true)){
-			printOptions();
-			System.exit(0);
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
 		}
 		
-		for(String s : args){if(s.startsWith("out=standardout") || s.startsWith("out=stdout")){outstream=System.err;}}
-		outstream.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
-		
-		boolean setInterleaved=false; //Whether it was explicitly set.
-
-		
-		
-		Shared.READ_BUFFER_LENGTH=Tools.min(200, Shared.READ_BUFFER_LENGTH);
 //		Shared.READ_BUFFER_NUM_BUFFERS=Shared.READ_BUFFER_NUM_BUFFERS;
 		ReadWrite.USE_PIGZ=ReadWrite.USE_UNPIGZ=true;
 		ReadWrite.MAX_ZIP_THREADS=Shared.threads();
@@ -82,12 +76,8 @@ public class DecontaminateByNormalization {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if(b==null || b.equalsIgnoreCase("null")){b=null;}
-			while(a.startsWith("-")){a=a.substring(1);} //In case people use hyphens
 			
-			if(Parser.isJavaFlag(arg)){
-				//do nothing
-			}else if(Parser.parseQuality(arg, a, b)){
+			if(Parser.parseQuality(arg, a, b)){
 				//do nothing
 			}else if(Parser.parseZip(arg, a, b)){
 				//do nothing
@@ -98,12 +88,11 @@ public class DecontaminateByNormalization {
 			}else if(parser.parseMapping(arg, a, b)){
 				//do nothing
 			}else if(a.equals("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 				ByteFile1.verbose=verbose;
 				ByteFile2.verbose=verbose;
 				stream.FastaReadInputStream.verbose=verbose;
 				ConcurrentGenericReadInputStream.verbose=verbose;
-//				align2.FastaReadInputStream2.verbose=verbose;
 				stream.FastqReadInputStream.verbose=verbose;
 				ReadWrite.verbose=verbose;
 			}else if(a.equals("minc")){
@@ -133,17 +122,17 @@ public class DecontaminateByNormalization {
 			}else if(a.equals("windowcov")){
 				CoveragePileup.LOW_COV_DEPTH=Double.parseDouble(b);
 			}else if(a.equals("mapraw")){
-				mapRawReads=Tools.parseBoolean(b);
+				mapRawReads=Parse.parseBoolean(b);
 			}
 			
 			/* Tadpole parameters */
 			else if(a.equals("tadpole") || a.equals("ecctadpole") || a.equals("ecct") || a.equals("ecc")){
-				ecct=Tools.parseBoolean(b);
+				ecct=Parse.parseBoolean(b);
 			}else if(a.equals("tadpoleaggressive") || a.equals("aggressive") || a.equals("aecc")){
-				tadpoleAggressive=Tools.parseBoolean(b);
+				tadpoleAggressive=Parse.parseBoolean(b);
 				if(tadpoleAggressive){tadpoleConservative=false;}
 			}else if(a.equals("tadpoleconservative") || a.equals("conservative") || a.equals("cecc")){
-				tadpoleConservative=Tools.parseBoolean(b);
+				tadpoleConservative=Parse.parseBoolean(b);
 				if(tadpoleConservative){tadpoleAggressive=false;}
 			}else if(a.equals("kt") || a.equals("ktadpole") || a.equals("tadpolek")){
 				tadpoleK=Integer.parseInt(b);
@@ -167,17 +156,17 @@ public class DecontaminateByNormalization {
 			
 			//Deprecated
 //			else if(a.equals("ecc")){
-//				ecc=Tools.parseBoolean(b);
+//				ecc=Parse.parseBoolean(b);
 //			}else if(a.equals("cecc")){
-//				cecc=Tools.parseBoolean(b);
+//				cecc=Parse.parseBoolean(b);
 //				if(cecc){ecc=true;aecc=false;}
 //			}else if(a.equals("aecc")){
-//				aecc=Tools.parseBoolean(b);
+//				aecc=Parse.parseBoolean(b);
 //				if(aecc){ecc=true;cecc=false;}
 //			}
 			
 			else if(a.equals("prefilter")){
-				prefilter=Tools.parseBoolean(b);
+				prefilter=Parse.parseBoolean(b);
 			}else if(a.equals("filterbits") || a.equals("fbits")){
 				filterBits=Integer.parseInt(b);
 			}else if(a.equals("prefilterbits") || a.equals("prebits") || a.equals("pbits")){
@@ -191,21 +180,25 @@ public class DecontaminateByNormalization {
 			}else if(a.equals("outdir") || a.equals("out")){
 				outdir=b;
 			}else if(a.equals("ref") || a.equals("refs")){
+				assert(b!=null) : "Bad parameter: "+arg;
 				String[] split2=b.split(",");
 				for(String name : split2){
 					refNames.add(name);
 				}
 			}else if(a.equals("read") || a.equals("reads") || a.equals("data")){
+				assert(b!=null) : "Bad parameter: "+arg;
 				String[] split2=b.split(",");
 				for(String name : split2){
 					readNames.add(name);
 				}
 			}else if(a.equals("refnamefile") || a.equals("refnamelist")){
+				assert(b!=null) : "Bad parameter: "+arg;
 				String[] split2=b.split(",");
 				for(String name : split2){
 					refNameFiles.add(name);
 				}
 			}else if(a.equals("readnamefile") || a.equals("readnamelist")){
+				assert(b!=null) : "Bad parameter: "+arg;
 				String[] split2=b.split(",");
 				for(String name : split2){
 					readNameFiles.add(name);
@@ -223,8 +216,6 @@ public class DecontaminateByNormalization {
 			maxReads=parser.maxReads;
 			
 			overwrite=ReadStats.overwrite=parser.overwrite;
-
-			setInterleaved=parser.setInterleaved;
 		}
 
 		parseStringsFromFiles(readNameFiles);
@@ -267,13 +258,13 @@ public class DecontaminateByNormalization {
 		renameAndMux_MT(readNames, mergePath);
 		if(ecct){
 			eccTadpole(mergePath, tadpolePath);
-			if(deleteFiles){delete(mergePath);}
+			if(deleteFiles){ReadWrite.delete(mergePath, verbose);}
 			mergePath=tadpolePath;
 		}
 		normalize(mergePath, normPath, normK, minDepth, normTarget, normHashes, normPasses, ecc, prefilter, normalizeByLowerDepth);
-		if(deleteFiles){delete(mergePath);}
+		if(deleteFiles){ReadWrite.delete(mergePath, verbose);}
 		demux(normPath, readNames);
-		if(deleteFiles){delete(normPath);}
+		if(deleteFiles){ReadWrite.delete(normPath, verbose);}
 		map(readNames, refNames, 1);
 		filter(readNames, refNames);
 		
@@ -331,7 +322,7 @@ public class DecontaminateByNormalization {
 
 			if(cris.paired()){
 				outstream.println("Writing interleaved.");
-			}			
+			}
 
 			assert(!in.equalsIgnoreCase(fnameOut)) : "Input file and output file have same name.";
 
@@ -348,7 +339,7 @@ public class DecontaminateByNormalization {
 					assert((r.mate!=null)==cris.paired());
 				}
 
-				while(reads!=null && reads.size()>0){
+				while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
 					
 					for(int idx=0; idx<reads.size(); idx++){
 						final Read r1=reads.get(idx);
@@ -375,7 +366,7 @@ public class DecontaminateByNormalization {
 					
 					if(ros!=null){ros.add(listOut, ln.id);}
 
-					cris.returnList(ln.id, ln.list.isEmpty());
+					cris.returnList(ln);
 					ln=cris.nextList();
 					reads=(ln!=null ? ln.list : null);
 				}
@@ -681,42 +672,7 @@ public class DecontaminateByNormalization {
 		return sdf.format(new Date());
 	}
 	
-	/**
-	 * Delete all non-null filenames.
-	 * @param prefix Append this prefix to filenames before attempting to delete them
-	 * @param names Filenames to delete
-	 */
-	private void delete(String path){
-		if(path==null){return;}
-		if(verbose){System.err.println("Trying to delete "+path);}
-		File f=new File(path);
-		if(f.exists()){
-			try {
-				f.delete();
-			} catch (Exception e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-		}
-	}
-	
 	/*--------------------------------------------------------------*/
-	
-	private void printOptions(){
-		assert(false) : "printOptions: TODO";
-//		outstream.println("Syntax:\n");
-//		outstream.println("java -ea -Xmx512m -cp <path> jgi.ReformatReads in=<infile> in2=<infile2> out=<outfile> out2=<outfile2>");
-//		outstream.println("\nin2 and out2 are optional.  \nIf input is paired and there is only one output file, it will be written interleaved.\n");
-//		outstream.println("Other parameters and their defaults:\n");
-//		outstream.println("overwrite=false  \tOverwrites files that already exist");
-//		outstream.println("ziplevel=4       \tSet compression level, 1 (low) to 9 (max)");
-//		outstream.println("interleaved=false\tDetermines whether input file is considered interleaved");
-//		outstream.println("fastawrap=70     \tLength of lines in fasta output");
-//		outstream.println("qin=auto         \tASCII offset for input quality.  May be set to 33 (Sanger), 64 (Illumina), or auto");
-//		outstream.println("qout=auto        \tASCII offset for output quality.  May be set to 33 (Sanger), 64 (Illumina), or auto (meaning same as input)");
-//		outstream.println("outsingle=<file> \t(outs) Write singleton reads here, when conditionally discarding reads from pairs.");
-	}
-	
 	
 	/*--------------------------------------------------------------*/
 	/*----------------            Fields            ----------------*/
@@ -727,7 +683,7 @@ public class DecontaminateByNormalization {
 	
 	private String logName=null;
 	private String resultsName="results.txt";
-	private String tempdir=(Shared.TMPDIR == null ? "" : Shared.TMPDIR);
+	private String tempdir=(Shared.tmpdir() == null ? "" : Shared.tmpdir());
 	private String outdir=null;
 	
 	/*--------------------------------------------------------------*/

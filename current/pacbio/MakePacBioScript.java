@@ -1,14 +1,12 @@
 package pacbio;
 
 import java.io.File;
-import java.util.ArrayList;
-
-import align2.Tools;
 
 import dna.Data;
-import dna.Parser;
 import fileIO.ReadWrite;
 import fileIO.TextFile;
+import shared.Parse;
+import shared.Shared;
 
 /**
  * @author Brian Bushnell
@@ -42,16 +40,16 @@ public class MakePacBioScript {
 		
 		if(args==null || args.length<1){
 			System.out.println("\nThis program generates a script for error-correcting PacBio reads using Illumina reads.\nSample command line:\n");
-//			System.out.println("java -ea -Xmx64m"+(Data.WINDOWS ? "" : " -cp "+Data.ROOT)+" jgi.MakePacBioScript " +
+//			System.out.println("java -ea -Xmx64m"+(Shared.WINDOWS ? "" : " -cp "+Data.ROOT)+" jgi.MakePacBioScript " +
 //					"dirty=subreads.fa clean=illumina.fq ref=ecoliRef.fa name=ecoli " +
-//					"out=run.sh template="+(Data.WINDOWS ? "" : "/house/homedirs/b/bushnell/template/")+"cleanPacbioTemplate.sh " +
+//					"out=run.sh template="+(Shared.WINDOWS ? "" : "/house/homedirs/b/bushnell/template/")+"cleanPacbioTemplate.sh " +
 //					"targetsize=5.4m threads=24 ram=31 maxram=100 noderam=256 build=-1 refbuild=-1 maxreads=-1");
-//			System.out.println("java -ea -Xmx64m"+(Data.WINDOWS ? "" : " -cp "+Data.ROOT)+" jgi.MakePacBioScript " +
+//			System.out.println("java -ea -Xmx64m"+(Shared.WINDOWS ? "" : " -cp "+Data.ROOT)+" jgi.MakePacBioScript " +
 //					"dirty=subreads.fa clean=illumina.fq ref=ecoliRef.fa name=ecoli " +
-//					"out=run.sh template="+(Data.WINDOWS ? "" : "/house/homedirs/b/bushnell/template/")+"cleanPacbioTemplate.sh " +
+//					"out=run.sh template="+(Shared.WINDOWS ? "" : "/house/homedirs/b/bushnell/template/")+"cleanPacbioTemplate.sh " +
 //					"targetsize=5.4m threads=24 noderam=256");
 //			System.out.println("\n\nOr to be concise:");
-			System.out.println("java -ea -Xmx64m"+(Data.WINDOWS ? "" : " -cp "+Data.ROOT())+" jgi.MakePacBioScript " +
+			System.out.println("java -ea -Xmx64m"+(Shared.WINDOWS ? "" : " -cp "+Data.ROOT())+" jgi.MakePacBioScript " +
 					"d=subreads.fa c=illumina.fq tpl=template.sh ts=5.4m t=24 nm=256");
 			System.out.println("\n\nInput files can optionally be comma-separated lists of files, and absolute pathing can be used.");
 			System.out.println("All input files may be raw, gzipped, or bzipped as long as they have the correct file extension.");
@@ -75,8 +73,8 @@ public class MakePacBioScript {
 			System.out.println("b=,build=        \tPrefix for index build number.  Default is 2, yielding successively improved builds 2, 200, 201, 202, ... 208");
 			System.out.println("rb=,refbuild=    \tReference build number.  Default is 1.");
 			System.out.println("cp=,classpath=   \tClasspath to the program.  If unspecified, will be autodetected as "+
-					(Data.WINDOWS ? "/house/homedirs/b/bushnell/beta19/" : Data.ROOT()));
-//			r=ref.fa o=run.sh 
+					(Shared.WINDOWS ? "/house/homedirs/b/bushnell/beta19/" : Data.ROOT()));
+//			r=ref.fa o=run.sh
 			System.exit(0);
 		}
 		
@@ -88,7 +86,7 @@ public class MakePacBioScript {
 		String template=null;
 		String output="run.sh";
 		String extra="";
-		String classpath=(Data.WINDOWS ? "/house/homedirs/b/bushnell/beta19/" : Data.ROOT());
+		String classpath=(Shared.WINDOWS ? "/house/homedirs/b/bushnell/beta19/" : Data.ROOT());
 		String sort_in="";
 		String sorted="sorted_topo#.txt.gz";
 		String sorted_out="sorted_topo1.txt.gz";
@@ -128,14 +126,12 @@ public class MakePacBioScript {
 			String b=split[1];
 			if(b.equalsIgnoreCase("null")){b=null;}
 			
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(a.equals("threads") || a.startsWith("slots") || a.equals("t")){
+			if(a.equals("threads") || a.startsWith("slots") || a.equals("t")){
 				threads=Integer.parseInt(b);
 			}else if(a.equals("mode")){
 				mode=b;
 			}else if(a.startsWith("reads") || a.startsWith("maxreads") || a.equals("rd")){
-				maxReads=Tools.parseKMG(b);
+				maxReads=Parse.parseKMG(b);
 			}else if(a.startsWith("build") || a.startsWith("genome") || a.equals("b")){
 				build=Integer.parseInt(b);
 				String s=Data.chromFname(1, build);
@@ -203,9 +199,9 @@ public class MakePacBioScript {
 				output=b;
 				if((new File(b)).exists()){System.out.println("Warning! Outfile already exists: "+b);}
 			}else if(a.startsWith("ecc")){
-				ecc=Tools.parseBoolean(b);
+				ecc=Parse.parseBoolean(b);
 			}else if(a.equals("sort")){
-				sort=Tools.parseBoolean(b);
+				sort=Parse.parseBoolean(b);
 			}else{
 				throw new RuntimeException("Unknown parameter "+args[i]);
 			}
@@ -215,10 +211,10 @@ public class MakePacBioScript {
 			if(mode==null){mode="pacbio";}
 			mode=mode.toLowerCase();
 			if(mode.equals("pacbio") || mode.equals("pacbio_illumina")){
-				template=(Data.WINDOWS ? "C:/workspace/prune/cleanPacbioTemplate_ecc.sh" : "/house/homedirs/b/bushnell/template/cleanPacbioTemplate_ecc_maxram.sh");
+				template=(Shared.WINDOWS ? "C:/workspace/prune/cleanPacbioTemplate_ecc.sh" : "/house/homedirs/b/bushnell/template/cleanPacbioTemplate_ecc_maxram.sh");
 			}else if(mode.equals("assembly") || mode.equals("assembly_illumina")
 					|| mode.equals("reference") || mode.equals("reference_illumina")){
-				template=(Data.WINDOWS ? "C:/workspace/prune/correctReference.sh" : "/house/homedirs/b/bushnell/template/correctReference_maxram.sh");
+				template=(Shared.WINDOWS ? "C:/workspace/prune/correctReference.sh" : "/house/homedirs/b/bushnell/template/correctReference_maxram.sh");
 			}else if(mode.equals("ccs") || mode.startsWith("ccs_")){
 				throw new RuntimeException("TODO: Mode "+mode+" is unfinished.");
 			}else if(mode.equals("pacbio_ccs") || mode.endsWith("_ccs")){
@@ -283,7 +279,7 @@ public class MakePacBioScript {
 			if(f.exists()){
 				targetsize=""+new File(ref).length();
 				if(ref.endsWith(".gz") || ref.endsWith(".gzip") || ref.endsWith(".zip") || ref.endsWith(".bz2")){
-					TextFile tf=new TextFile(ref, false, false);
+					TextFile tf=new TextFile(ref, false);
 					long x=1;
 					for(String s=tf.nextLine(); s!=null; s=tf.nextLine()){x+=s.length();}
 					tf.close();
@@ -309,7 +305,7 @@ public class MakePacBioScript {
 
 		String[] lines;
 		{
-			TextFile tf=new TextFile(template, false, false);
+			TextFile tf=new TextFile(template, false);
 			lines=tf.toStringLines();
 		}
 
@@ -338,7 +334,7 @@ public class MakePacBioScript {
 			}
 			
 			if(!s.startsWith("#")){
-				if((eccline && !ecc) || (sortline && !sort) || (refline && refbuild<1)){s="#"+s;} 
+				if((eccline && !ecc) || (sortline && !sort) || (refline && refbuild<1)){s="#"+s;}
 			}
 			
 			

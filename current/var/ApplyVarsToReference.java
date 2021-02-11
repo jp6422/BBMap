@@ -2,19 +2,18 @@ package var;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
-
 
 import align2.IndexMaker4;
-import align2.ReadStats;
-import align2.Tools;
-import dna.ChromArrayMaker;
 import dna.ChromosomeArray;
 import dna.Data;
 import dna.FastaToChromArrays2;
-import dna.Gene;
-import dna.Timer;
 import fileIO.ReadWrite;
+import shared.Parse;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 
 /**
  * @author Brian Bushnell
@@ -24,7 +23,12 @@ import fileIO.ReadWrite;
 public class ApplyVarsToReference {
 	
 	public static void main(String[] args){
-		System.err.println("Executing "+(new Object() { }.getClass().getEnclosingClass().getName())+" "+Arrays.toString(args)+"\n");
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
+		
 		Timer t=new Timer();
 
 		String inPattern=args[0];
@@ -39,7 +43,7 @@ public class ApplyVarsToReference {
 			final String arg=args[i].toLowerCase();
 			String[] split=arg.split("=");
 			String a=split[0];
-			String b=(split.length>1 ? split[1] : null);
+			String b=split.length>1 ? split[1] : null;
 			
 			if(a.equals("ingenome")){
 				Data.setGenome(Integer.parseInt(b));
@@ -58,15 +62,15 @@ public class ApplyVarsToReference {
 			}else if(a.equals("nblocktrigger")){
 				N_BLOCK_TRIGGER=Integer.parseInt(b);
 			}else if(a.equals("staynearref")){
-				STAY_NEAR_REF=Tools.parseBoolean(b);
+				STAY_NEAR_REF=Parse.parseBoolean(b);
 			}else if(a.equals("append") || a.equals("app")){
-				append=ReadStats.append=Tools.parseBoolean(b);
+				append=ReadStats.append=Parse.parseBoolean(b);
 			}else if(a.equals("overwrite") || a.equals("ow")){
-				overwrite=Tools.parseBoolean(b);
+				overwrite=Parse.parseBoolean(b);
 			}else if(a.startsWith("regen")){
-				REGEN_N_BLOCKS=Tools.parseBoolean(b);
+				REGEN_N_BLOCKS=Parse.parseBoolean(b);
 			}else if(a.startsWith("name=")){
-				REGEN_N_BLOCKS=Tools.parseBoolean(b);
+				REGEN_N_BLOCKS=Parse.parseBoolean(b);
 			}else{
 				System.err.println("Unknown argument "+arg);
 			}
@@ -117,15 +121,10 @@ public class ApplyVarsToReference {
 		
 	}
 	
-	/**
-	 * @param replaceFirst
-	 * @param chromFname
-	 * @param chrom
-	 */
 	public static void process(String inVarsName, String outChromName, int chrom) {
 		ArrayList<Varlet> vars=Varlet.fromTextFile(inVarsName);
 		ChromosomeArray cha=Data.getChromosome(chrom);
-		ChromosomeArray chb=new ChromosomeArray(chrom, Gene.PLUS);
+		ChromosomeArray chb=new ChromosomeArray(chrom, Shared.PLUS);
 		
 		//Next location to read in a
 		int aloc=0;

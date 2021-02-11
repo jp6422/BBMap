@@ -2,11 +2,10 @@ package stream;
 
 import java.util.ArrayList;
 
-import dna.Data;
-
 import align2.RandomReads3;
-import align2.Shared;
-import align2.Tools;
+import dna.Data;
+import shared.Shared;
+import shared.Tools;
 
 /**
  * @author Brian Bushnell
@@ -110,7 +109,7 @@ public class RandomReadInputStream3 extends ReadInputStream {
 		if(toMake<1){return;}
 		toMake=Tools.min(toMake, BUF_LEN);
 		
-		ArrayList<Read> reads=rr.makeRandomReadsX((int)toMake, minreadlen, maxreadlen,
+		ArrayList<Read> reads=rr.makeRandomReadsX((int)toMake, minreadlen, maxreadlen, -1,
 				maxSnps, maxInss, maxDels, maxSubs, maxNs,
 				snpRate, insRate, delRate, subRate, NRate,
 				minInsertionLen, minDeletionLen, minSubLen, minNLen,
@@ -124,6 +123,7 @@ public class RandomReadInputStream3 extends ReadInputStream {
 //		assert(false) : reads.size()+", "+toMake;
 	}
 	
+	@Override
 	public synchronized void restart(){
 		next=0;
 		buffer=null;
@@ -143,7 +143,7 @@ public class RandomReadInputStream3 extends ReadInputStream {
 	private ArrayList<Read> buffer=null;
 	private int next=0;
 	
-	private final int BUF_LEN=Shared.READ_BUFFER_LENGTH;
+	private final int BUF_LEN=Shared.bufferLen();;
 
 	public long generated=0;
 	public long consumed=0;

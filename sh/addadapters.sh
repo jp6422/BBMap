@@ -1,22 +1,24 @@
 #!/bin/bash
-#addadapters in=<infile> out=<outfile>
 
-function usage(){
+usage(){
 echo "
 Written by Brian Bushnell
 Last modified February 17, 2015
+
+***DEPRECATED***
 
 Description:  Randomly adds adapters to a file, or grades a trimmed file.
 The input is a set of reads, paired or unpaired.
 The output is those same reads with adapter sequence replacing some of the bases in some reads.
 For paired reads, adapters are located in the same position in read1 and read2.
 This is designed for benchmarking adapter-trimming software, and evaluating methodology.
+randomreads.sh is better for paired reads, though, as it actually adds adapters at the correct location,
+so that overlap may be used for adapter detection.
 
 Usage:  addadapters.sh in=<file> in2=<file2> out=<outfile> out2=<outfile2> adapters=<file>
 
 in2 and out2 are for paired reads and are optional.
 If input is paired and there is only one output file, it will be written interleaved.
-
 
 Parameters:
 ow=f                (overwrite) Overwrites files that already exist.
@@ -38,6 +40,7 @@ Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -52,7 +55,6 @@ popd > /dev/null
 CP="$DIR""current/"
 
 z="-Xmx200m"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -62,16 +64,13 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 }
 calcXmx "$@"
 
 function addadapters() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-	fi
-	local CMD="java $EA $z -cp $CP jgi.AddAdapters $@"
+	local CMD="java $EA $EOOM $z -cp $CP jgi.AddAdapters $@"
 	echo $CMD >&2
 	eval $CMD
 }

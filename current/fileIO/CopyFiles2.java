@@ -2,8 +2,7 @@ package fileIO;
 
 import java.io.File;
 
-import dna.Data;
-import dna.Timer;
+import shared.Timer;
 
 
 public class CopyFiles2 {
@@ -133,27 +132,27 @@ public class CopyFiles2 {
 	public static final String[] dirNames={"\\CNV\\", "\\SV\\"};
 	
 	public static final String[] fileNamesAbsolute={
-		".*\\\\gene-GS.+-ASM.*\\.tsv.*", 
-		".*\\\\geneVarSummary-GS.+-ASM.*\\.tsv.*", 
-		".*\\\\summary-GS.+-ASM.*\\.tsv.*", 
-		".*\\\\var-GS.+-ASM.*\\.tsv.*", 
-		".*\\\\manifest\\.all", 
-		".*\\\\README\\..*", 
+		".*\\\\gene-GS.+-ASM.*\\.tsv.*",
+		".*\\\\geneVarSummary-GS.+-ASM.*\\.tsv.*",
+		".*\\\\summary-GS.+-ASM.*\\.tsv.*",
+		".*\\\\var-GS.+-ASM.*\\.tsv.*",
+		".*\\\\manifest\\.all",
+		".*\\\\README\\..*",
 		".*\\\\version",
 	};
 	
 	public static final String[] fileNames={
-		"gene-GS.+-ASM.*\\.tsv.*", 
-		"geneVarSummary-GS.+-ASM.*\\.tsv.*", 
-		"summary-GS.+-ASM.*\\.tsv.*", 
-		"var-GS.+-ASM.*\\.tsv.*", 
-		"manifest\\.all", 
-		"README\\..*", 
+		"gene-GS.+-ASM.*\\.tsv.*",
+		"geneVarSummary-GS.+-ASM.*\\.tsv.*",
+		"summary-GS.+-ASM.*\\.tsv.*",
+		"var-GS.+-ASM.*\\.tsv.*",
+		"manifest\\.all",
+		"README\\..*",
 		"version",
 	};
 	
 	public static final String[] badNames={
-		".*AppleDouble.*", 
+		".*AppleDouble.*",
 		".*DS_Store.*",
 		".*EVIDENCE.*"
 	};

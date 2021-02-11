@@ -2,19 +2,20 @@ package driver;
 
 import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 
-import align2.Shared;
-import align2.Tools;
-import dna.Parser;
-import dna.Timer;
 import fileIO.ByteFile;
 import fileIO.ByteFile1;
 import fileIO.ByteFile2;
 import fileIO.ByteStreamWriter;
 import fileIO.FileFormat;
 import fileIO.ReadWrite;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 import stream.ConcurrentGenericReadInputStream;
 import stream.FastaReadInputStream;
 import structures.IntList;
@@ -28,19 +29,20 @@ public class ProcessWebcheck {
 	
 	public static void main(String[] args){
 		Timer t=new Timer();
-		ProcessWebcheck sample=new ProcessWebcheck(args);
-		sample.process(t);
+		ProcessWebcheck x=new ProcessWebcheck(args);
+		x.process(t);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(x.outstream);
 	}
 	
 	public ProcessWebcheck(String[] args){
 		
-		args=Parser.parseConfig(args);
-		if(Parser.parseHelp(args, true)){
-			printOptions();
-			System.exit(0);
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, outstream, null, false);
+			args=pp.args;
+			outstream=pp.outstream;
 		}
-		
-//		outstream.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
 		
 		ReadWrite.USE_PIGZ=ReadWrite.USE_UNPIGZ=true;
 		ReadWrite.MAX_ZIP_THREADS=Shared.threads();
@@ -51,25 +53,23 @@ public class ProcessWebcheck {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if(b==null || b.equalsIgnoreCase("null")){b=null;}
-			while(a.startsWith("-")){a=a.substring(1);} //In case people use hyphens
 
 			if(parser.parse(arg, a, b)){
 				//do nothing
 			}else if(a.equals("extendedstats") || a.equals("es")){
-				extendedStats=Tools.parseBoolean(b);
+				extendedStats=Parse.parseBoolean(b);
 			}else if(a.equals("invalid") || a.equals("outinvalid")){
 				outInvalid=b;
 			}else if(a.equals("fail") || a.equals("outfail")){
 				outFail=b;
 			}else if(a.equals("ms") || a.equals("millis")){
-				boolean x=Tools.parseBoolean(b);
+				boolean x=Parse.parseBoolean(b);
 				ms=(x ? "ms" : "");
 			}else if(a.equals("lines")){
 				maxLines=Long.parseLong(b);
 				if(maxLines<0){maxLines=Long.MAX_VALUE;}
 			}else if(a.equals("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 				ByteFile1.verbose=verbose;
 				ByteFile2.verbose=verbose;
 				stream.FastaReadInputStream.verbose=verbose;
@@ -102,10 +102,7 @@ public class ProcessWebcheck {
 		
 		assert(FastaReadInputStream.settingsOK());
 		
-		if(in1==null){
-			printOptions();
-			throw new RuntimeException("Error - at least one input file is required.");
-		}
+		if(in1==null){throw new RuntimeException("Error - at least one input file is required.");}
 		
 		if(!ByteFile.FORCE_MODE_BF2){
 			ByteFile.FORCE_MODE_BF2=false;
@@ -153,22 +150,9 @@ public class ProcessWebcheck {
 		}
 		
 		for(FileFormat ff : ffin1){
-			ByteFile bf=ByteFile.makeByteFile(ff, false);
+			ByteFile bf=ByteFile.makeByteFile(ff);
 			process2(bf, bswFail, bswInvalid);
 		}
-
-		//		double rpnano=linesProcessed/(double)(t.elapsed);
-		//		double bpnano=bytesProcessed/(double)(t.elapsed);
-		//
-		//		String rpstring=(linesProcessed<100000 ? ""+linesProcessed : linesProcessed<100000000 ? (linesProcessed/1000)+"k" : (linesProcessed/1000000)+"m");
-		//		String bpstring=(bytesProcessed<100000 ? ""+bytesProcessed : bytesProcessed<100000000 ? (bytesProcessed/1000)+"k" : (bytesProcessed/1000000)+"m");
-		//
-		//		while(rpstring.length()<8){rpstring=" "+rpstring;}
-		//		while(bpstring.length()<8){bpstring=" "+bpstring;}
-		//		
-		//		outstream.println("Time:                         \t"+t);
-		//		outstream.println("Lines Processed:    "+rpstring+" \t"+String.format("%.2fk lines/sec", rpnano*1000000));
-		//		outstream.println("Bytes Processed:    "+bpstring+" \t"+String.format("%.2fm bytes/sec", bpnano*1000));
 
 		passLatency.shrink();
 		failLatency.shrink();
@@ -179,7 +163,7 @@ public class ProcessWebcheck {
 
 		ArrayList<String> list=new ArrayList<String>();
 		list.addAll(map.keySet());
-		Collections.sort(list);
+		Shared.sort(list);
 		for(String s : list){
 			sb.append(s+"\t"+map.get(s)[0]+"\n");
 		}
@@ -195,11 +179,11 @@ public class ProcessWebcheck {
 			sb.append("Failing:\t"
 					+ failLatency.size).append('\n');
 			sb.append("Avg_Pass_Latency:\t"
-					+ (passLatency.size>0 ? Tools.average(passLatency.array) : 0)+ms).append('\n');
+					+ (passLatency.size>0 ? Tools.averageInt(passLatency.array) : 0)+ms).append('\n');
 			sb.append("Max_Pass_Latency:\t"
 					+ (passLatency.size>0 ? Tools.max(passLatency.array) : 0)+ms).append('\n');
 			sb.append("Avg_Fail_Latency:\t"
-					+ (failLatency.size>0 ? Tools.average(failLatency.array) : 0)+ms).append('\n');
+					+ (failLatency.size>0 ? Tools.averageInt(failLatency.array) : 0)+ms).append('\n');
 			sb.append("Max_Fail_Latency:\t"
 					+ (failLatency.size>0 ? Tools.max(failLatency.array) : 0)+ms).append('\n');
 			sb.append("Observed_Fail_Codes:");
@@ -235,7 +219,7 @@ public class ProcessWebcheck {
 				linesProcessed++;
 				bytesProcessed+=line.length;
 				
-				boolean valid=(line[0]!='#' && Character.isDigit(line[line.length-1]));
+				boolean valid=(line[0]!='#' && Tools.isDigit(line[line.length-1]));
 				String[] split=null;
 				if(valid){
 					split=new String(line).split("\\|");
@@ -288,10 +272,6 @@ public class ProcessWebcheck {
 	}
 	
 	/*--------------------------------------------------------------*/
-	
-	private void printOptions(){
-		assert(false) : "printOptions: TODO";
-	}
 	
 	
 	/*--------------------------------------------------------------*/

@@ -1,11 +1,12 @@
 package driver;
 
-import stream.SamLine;
-import align2.Shared;
-import align2.Tools;
 import fileIO.ReadWrite;
 import fileIO.TextFile;
 import fileIO.TextStreamWriter;
+import shared.Parse;
+import shared.Shared;
+import shared.Tools;
+import stream.SamLine;
 
 /**
  * 
@@ -24,16 +25,16 @@ public final class SelectReads {
 		
 		ReadWrite.USE_PIGZ=ReadWrite.USE_UNPIGZ=true;
 		ReadWrite.MAX_ZIP_THREADS=Shared.threads();
-		ReadWrite.ZIP_THREAD_DIVISOR=1;
+		
 		
 		int minlen=1;
 		long reads=Long.MAX_VALUE;
 		char symbol='D';
 		if(args.length>2){symbol=(char)args[2].charAt(0);}
 		if(args.length>3){minlen=Integer.parseInt(args[3]);}
-		if(args.length>4){reads=Tools.parseKMG(args[4]);}
+		if(args.length>4){reads=Parse.parseKMG(args[4]);}
 		
-		symbol=Character.toUpperCase(symbol);
+		symbol=Tools.toUpperCase(symbol);
 		if(symbol=='='){symbol='M';}
 		if(symbol=='X'){symbol='S';}
 		if(symbol=='N'){symbol='D';}
@@ -42,7 +43,7 @@ public final class SelectReads {
 		final int index=Tools.indexOf(new char[] {'M','S','D','I','C'}, symbol);
 		assert(index>=0) : "Symbol (3rd argument) must be M, S, D, I, C (for match string symbols) or M, =, X, D, N, I, S, H, P (for cigar symbols).";
 		
-		TextFile tf=new TextFile(args[0], true, false);
+		TextFile tf=new TextFile(args[0], true);
 		TextStreamWriter tsw=new TextStreamWriter(args[1], false, false, true);
 		tsw.start();
 		

@@ -2,12 +2,12 @@ package align2;
 
 import java.util.Arrays;
 
-import stream.Read;
-import stream.SiteScore;
-
 import dna.ChromosomeArray;
 import dna.Data;
-import dna.Gene;
+import shared.Shared;
+import shared.Tools;
+import stream.Read;
+import stream.SiteScore;
 
 /**
  * @author Brian Bushnell
@@ -15,25 +15,6 @@ import dna.Gene;
  *
  */
 public abstract class MSA {
-	
-	public static final float minIdToMinRatio(double minid, String classname){
-		if("MultiStateAligner9ts".equalsIgnoreCase(classname)){
-			return MultiStateAligner9ts.minIdToMinRatio(minid);
-		}else if("MultiStateAligner10ts".equalsIgnoreCase(classname)){
-			return MultiStateAligner10ts.minIdToMinRatio(minid);
-		}else if("MultiStateAligner11ts".equalsIgnoreCase(classname)){
-			return MultiStateAligner11ts.minIdToMinRatio(minid);
-		}else if("MultiStateAligner9PacBio".equalsIgnoreCase(classname)){
-			return MultiStateAligner9PacBio.minIdToMinRatio(minid);
-		}else if("MultiStateAligner9Flat".equalsIgnoreCase(classname)){
-			return MultiStateAligner9Flat.minIdToMinRatio(minid);
-		}else if("MultiStateAligner9XFlat".equalsIgnoreCase(classname)){
-			return MultiStateAligner9XFlat.minIdToMinRatio(minid);
-		}else{
-			assert(false) : "Unhandled MSA type: "+classname;
-			return MultiStateAligner11ts.minIdToMinRatio(minid);
-		}
-	}
 	
 	public static final MSA makeMSA(int maxRows_, int maxColumns_, String classname){
 		flatMode=false;
@@ -67,12 +48,12 @@ public abstract class MSA {
 		maxColumns=maxColumns_;
 	}
 	
-	/** return new int[] {rows, maxC, maxS, max}; 
+	/** return new int[] {rows, maxC, maxS, max};
 	 * Will not fill areas that cannot match minScore */
 	public abstract int[] fillLimited(byte[] read, byte[] ref, int refStartLoc, int refEndLoc, int minScore, int[] gaps);
 	
 	
-	/** return new int[] {rows, maxC, maxS, max}; 
+	/** return new int[] {rows, maxC, maxS, max};
 	 * Will not fill areas that cannot match minScore */
 	public abstract int[] fillUnlimited(byte[] read, byte[] ref, int refStartLoc, int refEndLoc, int[] gaps);
 	
@@ -90,11 +71,11 @@ public abstract class MSA {
 	public abstract byte[] traceback2(byte[] read, byte[] ref, int refStartLoc, int refEndLoc, int row, int col, int state);
 	
 	/** @return {score, bestRefStart, bestRefStop} */
-	public abstract int[] score(final byte[] read, final byte[] ref, final int refStartLoc, final int refEndLoc, 
+	public abstract int[] score(final byte[] read, final byte[] ref, final int refStartLoc, final int refEndLoc,
 			final int maxRow, final int maxCol, final int maxState, boolean gapped);
 	
 	/** @return {score, bestRefStart, bestRefStop}, or {score, bestRefStart, bestRefStop, padLeft, padRight} if more padding is needed */
-	public abstract int[] score2(final byte[] read, final byte[] ref, final int refStartLoc, final int refEndLoc, 
+	public abstract int[] score2(final byte[] read, final byte[] ref, final int refStartLoc, final int refEndLoc,
 			final int maxRow, final int maxCol, final int maxState);
 	
 	
@@ -214,7 +195,7 @@ public abstract class MSA {
 	
 	/** Assumes match string is in long format */
 	public final boolean toLocalAlignment(Read r, SiteScore ss, byte[] basesM, int minToClip, float matchPointsMult){
-		final byte[] match=r.match, bases=(r.strand()==Gene.PLUS ? r.bases : basesM);
+		final byte[] match=r.match, bases=(r.strand()==Shared.PLUS ? r.bases : basesM);
 		if(match==null || match.length<1){return false;}
 		
 		assert(match==ss.match);
@@ -446,7 +427,7 @@ public abstract class MSA {
 			}
 		}
 		
-		assert(ss==null || ((ss.start==r.start) && (ss.stop==r.stop) && (ss.strand==r.strand()) && (ss.chrom==r.chrom) && (ss.match==r.match))) : 
+		assert(ss==null || ((ss.start==r.start) && (ss.stop==r.stop) && (ss.strand==r.strand()) && (ss.chrom==r.chrom) && (ss.match==r.match))) :
 			"\nr="+r+"\nr2="+r.mate+"\nss=\n"+ss+"\n"+(ss==null ? "ss is null" : ((ss.start==r.start)+", "+(ss.stop==r.stop)+", "+
 			(ss.strand==r.strand())+", "+(ss.chrom==r.chrom)+", "+(ss.match==r.match)));
 		
@@ -484,19 +465,23 @@ public abstract class MSA {
 	}
 	
 
-	/** Assumes match string is in long format. */
+	/** Works in short or long format. */
 	public final int score(byte[] match){
 		if(match==null || match.length<1){return 0;}
 		
 		byte mode=match[0], prevMode='0';
 		int current=0, prevStreak=0;
 		int score=0;
+		boolean hasDigit=false;
 		
 		for(int mpos=0; mpos<match.length; mpos++){
 			byte c=match[mpos];
 			
 			if(mode==c){
 				current++;
+			}else if(Tools.isDigit(c)){
+				current=(hasDigit ? current : 0)*10+c-'0';
+				hasDigit=true;
 			}else{
 				if(mode=='m'){
 					score+=calcMatchScore(current);
@@ -525,10 +510,11 @@ public abstract class MSA {
 				prevStreak=current;
 				mode=c;
 				current=1;
+				hasDigit=false;
 			}
 		}
 		if(current>0){
-			assert(mode==match[match.length-1]);
+			assert(hasDigit || mode==match[match.length-1]);
 			if(mode=='m'){
 				score+=calcMatchScore(current);
 //				if(prevMode=='N' || prevMode=='R'){score=score+POINTS_MATCH2()-POINTS_MATCH();} //Don't penalize first match after N
@@ -557,62 +543,6 @@ public abstract class MSA {
 		return score;
 	}
 	
-//	//TODO
-//	public final byte[] softClipBoundsShortmatch(byte[] match, byte[] bases, int minToClip){
-//		if(match==null || match.length<1){return null;}
-//		int[] score=new int[bases.length];
-//
-//		byte mode='0', c='0';
-//		int current=0;
-//		int rpos=0;
-//		long currentScore;
-//		for(int i=0; i<match.length; i++){
-//			c=match[i];
-//			if(Character.isDigit(c)){
-//				current=(current*10)+(c-'0');
-//			}else{
-//				if(mode==c){
-//					current=Tools.max(current+1, 2);
-//				}else{
-//					current=Tools.max(current, 1);
-//
-//					if(mode=='m'){
-//						msdicn[0]+=current;
-//					}else if(mode=='S'){
-//						msdicn[1]+=current;
-//					}else if(mode=='D'){
-//						msdicn[2]+=current;
-//					}else if(mode=='I'){
-//						msdicn[3]+=current;
-//					}else if(mode=='C' || mode=='X' || mode=='Y'){
-//						msdicn[4]+=current;
-//					}else if(mode=='N' || mode=='R'){
-//						msdicn[5]+=current;
-//					}
-//					mode=c;
-//					current=0;
-//				}
-//			}
-//		}
-//		if(current>0 || !Character.isDigit(c)){
-//			current=Tools.max(current, 1);
-//			if(mode=='m'){
-//				msdicn[0]+=current;
-//			}else if(mode=='S'){
-//				msdicn[1]+=current;
-//			}else if(mode=='D'){
-//				msdicn[2]+=current;
-//			}else if(mode=='I'){
-//				msdicn[3]+=current;
-//			}else if(mode=='C' || mode=='X' || mode=='Y'){
-//				msdicn[4]+=current;
-//			}else if(mode=='N' || mode=='R'){
-//				msdicn[5]+=current;
-//			}
-//		}
-//		return msdicn;
-//	}
-	
 	public abstract int maxQuality(int numBases);
 	
 	public abstract int maxQuality(byte[] baseScores);
@@ -621,7 +551,7 @@ public abstract class MSA {
 	
 	public abstract int maxImperfectScore(byte[] baseScores);
 	
-	public final static String toString(int[] a){
+	public static final String toString(int[] a){
 		
 		int width=7;
 		
@@ -656,7 +586,7 @@ public abstract class MSA {
 		System.out.println();
 	}
 	
-	public final static String toTimePacked(int[] a, int TIMEMASK, int lim){
+	public static final String toTimePacked(int[] a, int TIMEMASK, int lim){
 		int width=6;
 		lim=Tools.min(lim, a.length);
 		
@@ -673,10 +603,10 @@ public abstract class MSA {
 		return sb.toString();
 	}
 	
-	public final static String toScorePacked(int[] a, int SCOREOFFSET, int lim){
+	public static final String toScorePacked(int[] a, int SCOREOFFSET, int lim){
 		int width=6;
 		lim=Tools.min(lim, a.length);
-
+		
 //		String minString=" -";
 //		String maxString="  ";
 //		while(minString.length()<width){minString+='9';}
@@ -701,7 +631,7 @@ public abstract class MSA {
 		return sb.toString();
 	}
 	
-	public final static String toString(byte[] a){
+	public static final String toString(byte[] a){
 		
 		int width=6;
 		
@@ -717,7 +647,7 @@ public abstract class MSA {
 		return sb.toString();
 	}
 	
-	public final static String toString(byte[] ref, int startLoc, int stopLoc){
+	public static final String toString(byte[] ref, int startLoc, int stopLoc){
 		StringBuilder sb=new StringBuilder(stopLoc-startLoc+1);
 		for(int i=startLoc; i<=stopLoc; i++){sb.append((char)ref[i]);}
 		return sb.toString();
@@ -749,6 +679,25 @@ public abstract class MSA {
 	public abstract int calcDelScore(int len, boolean approximateGaps);
 	
 	public abstract int calcInsScore(int len);
+	
+	public static final float minIdToMinRatio(double minid, String classname){
+		if("MultiStateAligner9ts".equalsIgnoreCase(classname)){
+			return MultiStateAligner9ts.minIdToMinRatio(minid);
+		}else if("MultiStateAligner10ts".equalsIgnoreCase(classname)){
+			return MultiStateAligner10ts.minIdToMinRatio(minid);
+		}else if("MultiStateAligner11ts".equalsIgnoreCase(classname)){
+			return MultiStateAligner11ts.minIdToMinRatio(minid);
+		}else if("MultiStateAligner9PacBio".equalsIgnoreCase(classname)){
+			return MultiStateAligner9PacBio.minIdToMinRatio(minid);
+		}else if("MultiStateAligner9Flat".equalsIgnoreCase(classname)){
+			return MultiStateAligner9Flat.minIdToMinRatio(minid);
+		}else if("MultiStateAligner9XFlat".equalsIgnoreCase(classname)){
+			return MultiStateAligner9XFlat.minIdToMinRatio(minid);
+		}else{
+			assert(false) : "Unhandled MSA type: "+classname;
+			return MultiStateAligner11ts.minIdToMinRatio(minid);
+		}
+	}
 	
 	static final int GAPBUFFER=Shared.GAPBUFFER;
 	static final int GAPBUFFER2=Shared.GAPBUFFER2;
@@ -791,6 +740,7 @@ public abstract class MSA {
 	static final byte MODE_INS=2;
 	static final byte MODE_SUB=3;
 	
+	//These are to allow constants to be overridden
 	public abstract int POINTS_NOREF();
 	public abstract int POINTS_NOCALL();
 	public abstract int POINTS_MATCH();
@@ -824,32 +774,6 @@ public abstract class MSA {
 	public abstract int LIMIT_FOR_COST_5();
 	
 	public abstract int BAD();
-	
-	
-//	public static final int POINTSoff_NOREF=(POINTS_NOREF<<SCOREOFFSET);
-//	public static final int POINTSoff_NOCALL=(POINTS_NOCALL<<SCOREOFFSET);
-//	public static final int POINTSoff_MATCH=(POINTS_MATCH<<SCOREOFFSET);
-//	public static final int POINTSoff_MATCH2=(POINTS_MATCH2<<SCOREOFFSET);
-//	public static final int POINTSoff_COMPATIBLE=(POINTS_COMPATIBLE<<SCOREOFFSET);
-//	public static final int POINTSoff_SUB=(POINTS_SUB<<SCOREOFFSET);
-//	public static final int POINTSoff_SUBR=(POINTS_SUBR<<SCOREOFFSET);
-//	public static final int POINTSoff_SUB2=(POINTS_SUB2<<SCOREOFFSET);
-//	public static final int POINTSoff_SUB3=(POINTS_SUB3<<SCOREOFFSET);
-//	public static final int POINTSoff_MATCHSUB=(POINTS_MATCHSUB<<SCOREOFFSET);
-//	public static final int POINTSoff_INS=(POINTS_INS<<SCOREOFFSET);
-//	public static final int POINTSoff_INS2=(POINTS_INS2<<SCOREOFFSET);
-//	public static final int POINTSoff_INS3=(POINTS_INS3<<SCOREOFFSET);
-//	public static final int POINTSoff_INS4=(POINTS_INS4<<SCOREOFFSET);
-//	public static final int POINTSoff_DEL=(POINTS_DEL<<SCOREOFFSET);
-//	public static final int POINTSoff_DEL2=(POINTS_DEL2<<SCOREOFFSET);
-//	public static final int POINTSoff_DEL3=(POINTS_DEL3<<SCOREOFFSET);
-//	public static final int POINTSoff_DEL4=(POINTS_DEL4<<SCOREOFFSET);
-//	public static final int POINTSoff_DEL5=(POINTS_DEL5<<SCOREOFFSET);
-//	public static final int POINTSoff_GAP=(POINTS_GAP<<SCOREOFFSET);
-//	public static final int POINTSoff_DEL_REF_N=(POINTS_DEL_REF_N<<SCOREOFFSET);
-//	public static final int BADoff=(BAD<<SCOREOFFSET);
-//	public static final int MAXoff_SCORE=MAX_SCORE<<SCOREOFFSET;
-//	public static final int MINoff_SCORE=MIN_SCORE<<SCOREOFFSET;
 	
 	
 	public final int maxRows;

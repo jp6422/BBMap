@@ -1,6 +1,8 @@
 package dna;
 
-import java.util.Arrays;
+import java.util.Locale;
+
+import shared.KillSwitch;
 
 public class MotifProbsN extends Motif {
 	
@@ -27,7 +29,7 @@ public class MotifProbsN extends Motif {
 		for(int i=0; i<s2.length(); i++){
 			String sub=s2.substring(i, min(i+m.probs.length, s2.length()));
 			float p=m.matchStrength(sbytes, i);
-			System.out.println(sub+String.format(": \t%.5f ->\t%.5f", p, m.normalize(p)));
+			System.out.println(sub+String.format(Locale.ROOT, ": \t%.5f ->\t%.5f", p, m.normalize(p)));
 		}
 		
 	}
@@ -65,7 +67,7 @@ public class MotifProbsN extends Motif {
 		super(name_, p.length, cen);
 		
 		N=n;
-		chunk=new byte[N];
+		chunk=KillSwitch.allocByte1D(N);
 		baseProb=Motif.baseProbN[N];
 		
 		probs=p;
@@ -98,7 +100,7 @@ public class MotifProbsN extends Motif {
 			int y=minPos(probs[i]);
 			sb.append((char)numberToBase[x>>(2*(N-1))]);
 
-//			pmax*=probs[i][x]*4; //TODO Note the .25; could be an empirical inverse probability, but that causes complications 
+//			pmax*=probs[i][x]*4; //TODO Note the .25; could be an empirical inverse probability, but that causes complications
 //			pmin*=probs[i][y]*4;
 
 			pmax*=probs[i][x];
@@ -144,6 +146,7 @@ public class MotifProbsN extends Motif {
 	}
 	
 	
+	@Override
 	public float normalize(double strength){
 		double r=strength-minProb;
 //		r=r/(maxProb-minProb);
@@ -164,6 +167,7 @@ public class MotifProbsN extends Motif {
 	}
 	
 	
+	@Override
 	public boolean matchesExactly(byte[] source, int a){
 		
 		a=a-center;
@@ -179,6 +183,7 @@ public class MotifProbsN extends Motif {
 	}
 	
 	
+	@Override
 	public float matchStrength(byte[] source, int a){
 		
 		a=a-center;
@@ -203,7 +208,7 @@ public class MotifProbsN extends Motif {
 			
 //			float p2=invBaseProb2[n];
 //			float p2=4; //TODO
-//			
+//
 //			r=r*p1*p2;
 			
 			r=r*p1;

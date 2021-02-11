@@ -2,13 +2,16 @@ package jgi;
 
 import java.util.ArrayList;
 
-import align2.Tools;
-import dna.Timer;
-import stream.ByteBuilder;
+import shared.Parse;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 import stream.ConcurrentReadInputStream;
 import stream.ConcurrentReadOutputStream;
 import stream.Read;
+import structures.ByteBuilder;
 import structures.ListNum;
+import template.BBTool_ST;
 
 /**
  * Fuses sequences together, with N-padding in between.
@@ -27,12 +30,20 @@ public final class FuseSequence extends BBTool_ST {
 	public FuseSequence(String[] args){
 		super(args);
 		reparse(args);
+		if(PAD_SYMBOL==0){PAD_SYMBOL='N';}
+		if(amino){
+			Shared.AMINO_IN=true;
+			if(PAD_SYMBOL=='N'){PAD_SYMBOL='X';}
+		}
 	}
 	
-	void setDefaults(){
+	@Override
+	protected void setDefaults(){
 		npad=300;
 		defaultQuality=30;
 		fusePairs=false;
+		PAD_SYMBOL=0;
+		amino=false;
 	}
 	
 	@Override
@@ -44,20 +55,32 @@ public final class FuseSequence extends BBTool_ST {
 			defaultQuality=Byte.parseByte(b);
 			return true;
 		}else if(a.equals("fp") || a.equals("fusepairs")){
-			fusePairs=Tools.parseBoolean(b);
+			fusePairs=Parse.parseBoolean(b);
 			return true;
-		}else if(a.equals("rename") || a.equals("name")){
-			name=b;
+		}else if(a.equals("maxlen")){
+			maxlen=(int)Tools.min(Parse.parseKMG(b), Shared.MAX_ARRAY_LEN);
+			return true;
+		}else if(a.equals("rename") || a.equals("name") || a.equals("prefix")){
+			name=(b==null ? "" : b);
+			return true;
+		}else if(a.equals("padsymbol")){
+			PAD_SYMBOL=b.charAt(0);
+			return true;
+		}else if(a.equals("amino")){
+			amino=Parse.parseBoolean(b);
 			return true;
 		}
 		return false;
 	}
 	
-	void processInner(final ConcurrentReadInputStream cris, final ConcurrentReadOutputStream ros){
+	@Override
+	protected void processInner(final ConcurrentReadInputStream cris, final ConcurrentReadOutputStream ros){
 		
 		readsProcessed=0;
 		basesProcessed=0;
-		
+
+		long outNum=0;
+		long lastListID=0;
 		{
 			
 			ListNum<Read> ln=cris.nextList();
@@ -68,9 +91,11 @@ public final class FuseSequence extends BBTool_ST {
 				assert((ffin1==null || ffin1.samOrBam()) || (r.mate!=null)==cris.paired());
 			}
 
-			while(reads!=null && reads.size()>0){
+			while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
 				if(verbose){outstream.println("Fetched "+reads.size()+" reads.");}
+				lastListID=ln.id;
 				
+				ArrayList<Read> readsOut=new ArrayList<Read>(reads.size());
 				for(int idx=0; idx<reads.size(); idx++){
 					final Read r1=reads.get(idx);
 					final Read r2=r1.mate;
@@ -87,13 +112,24 @@ public final class FuseSequence extends BBTool_ST {
 						basesProcessed+=initialLength2;
 					}
 					
+					if(!fusePairs && maxlen>0 && bases.length>0 && bases.length+initialLength1+initialLength2+npad>maxlen){
+						Read r=bufferToRead(outNum);
+						outNum++;
+						readsOut.add(r);
+					}
 					processReadPair(r1, r2);
-					
+					if(fusePairs){
+						readsOut.add(r1);
+					}else if(maxlen>=0 && bases.length>=maxlen){
+						Read r=bufferToRead(outNum);
+						outNum++;
+						readsOut.add(r);
+					}
 				}
 				
-				if(fusePairs && ros!=null){ros.add(reads, ln.id);}
+				if(ros!=null && (fusePairs || maxlen>0)){ros.add(readsOut, ln.id);}
 
-				cris.returnList(ln.id, ln.list.isEmpty());
+				cris.returnList(ln);
 				if(verbose){outstream.println("Returned a list.");}
 				ln=cris.nextList();
 				reads=(ln!=null ? ln.list : null);
@@ -102,20 +138,28 @@ public final class FuseSequence extends BBTool_ST {
 				cris.returnList(ln.id, ln.list==null || ln.list.isEmpty());
 			}
 		}
-		if(!fusePairs && ros!=null){
-			Read r=new Read(bases.toBytes(), quals.toBytes(), 0);
-			r.id=(name==null ? "0" : name);
-			ArrayList<Read> reads=new ArrayList<Read>(1);
-			reads.add(r);
-			ros.add(reads, 0);
+		if(ros!=null && bases.length()>0){
+			ArrayList<Read> readsOut=new ArrayList<Read>(1);
+			Read r=bufferToRead(outNum);
+			outNum++;
+			readsOut.add(r);
+			ros.add(readsOut, lastListID);
 		}
 	}
-
+	
+	Read bufferToRead(long id){
+		Read r=new Read(bases.toBytes(), (quals==null ? null : quals.toBytes()), 0);
+		bases.clear();
+		if(quals!=null){quals.clear();}
+		r.id=(name==null || name.length()==0 ? ""+id : name+" "+id);
+		return r;
+	}
+	
 	/* (non-Javadoc)
 	 * @see jgi.BBTool_ST#processReadPair(stream.Read, stream.Read)
 	 */
 	@Override
-	boolean processReadPair(Read r1, Read r2) {
+	protected boolean processReadPair(Read r1, Read r2) {
 		if(fusePairs){
 			fusePair(r1, r2);
 			return true;
@@ -138,7 +182,7 @@ public final class FuseSequence extends BBTool_ST {
 			if(quals!=null){quals[i]=r1.quality[i];}
 		}
 		for(int i=0, j=r1.length(); i<npad; i++, j++){
-			bases[j]='N';
+			bases[j]=(byte)PAD_SYMBOL;
 		}
 		for(int i=0, j=r1.length()+npad, max=r2.length(); i<max; i++, j++){
 			bases[j]=r2.bases[i];
@@ -154,7 +198,7 @@ public final class FuseSequence extends BBTool_ST {
 		if(name==null){name=r.id;}
 		if(bases.length>0){
 			for(int i=0; i<npad; i++){
-				bases.append('N');
+				bases.append(PAD_SYMBOL);
 				quals.append((byte)0);
 			}
 		}
@@ -169,19 +213,25 @@ public final class FuseSequence extends BBTool_ST {
 	}
 	
 	@Override
-	void startupSubclass() {}
+	protected void startupSubclass() {}
 	
 	@Override
-	void shutdownSubclass() {}
+	protected void shutdownSubclass() {}
 	
 	@Override
-	void showStatsSubclass(Timer t, long readsIn, long basesIn) {}
+	protected final boolean useSharedHeader(){return false;}
 	
+	@Override
+	protected void showStatsSubclass(Timer t, long readsIn, long basesIn) {}
+	
+	int maxlen=2147000000;
 	int npad;
 	byte defaultQuality;
 	boolean fusePairs;
 	ByteBuilder bases=new ByteBuilder();
 	ByteBuilder quals=new ByteBuilder();
 	String name;
+	char PAD_SYMBOL='N';
+	boolean amino=false;
 	
 }

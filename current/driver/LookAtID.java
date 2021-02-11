@@ -2,10 +2,9 @@ package driver;
 
 import java.util.Arrays;
 
-import stream.SiteScoreR;
-
-import align2.Tools;
 import fileIO.TextFile;
+import shared.Tools;
+import stream.SiteScoreR;
 
 /**
  * @author Brian Bushnell
@@ -16,7 +15,7 @@ public class LookAtID {
 	
 	public static void main(String[] args){
 		
-		TextFile tf=new TextFile(args[0], true, false);
+		TextFile tf=new TextFile(args[0], true);
 		
 		long max=0;
 		

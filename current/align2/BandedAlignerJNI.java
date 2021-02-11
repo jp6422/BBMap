@@ -1,7 +1,8 @@
 package align2;
 
-import java.io.File;
 import dna.AminoAcid;
+import shared.KillSwitch;
+import shared.Shared;
 
 /**
  * @author Jonathan Rood
@@ -10,34 +11,9 @@ import dna.AminoAcid;
  */
 public class BandedAlignerJNI extends BandedAligner{
 
-        static {
-                String name = "bbtoolsjni";
-                try {
-                        System.loadLibrary(name);
-                } catch (UnsatisfiedLinkError e1) {
-			// System.loadLibrary() does not work with MPI.
-			// Need to use System.load() with an explicit full
-			// path to the native library file for the MPI case.
-                        boolean success = false;
-                        String libpath=System.getProperty("java.library.path");
-                        libpath = libpath.replace("-Djava.library.path=","");
-                        String[] libpathEntries = libpath.split(File.pathSeparator);
-                        for(int i = 0; i < libpathEntries.length; i++) {
-                                if(success) break;
-                                String lib = libpathEntries[i]+"/"+System.mapLibraryName(name);
-                                try {
-                                        System.load(lib);
-                                        success = true;
-                                } catch (UnsatisfiedLinkError e2) {
-                                        success = false;
-                                        if((i+1) >= libpathEntries.length) {
-                                                System.err.println("Native library can not be found in java.library.path. ");
-                                                System.exit(1);
-                                        }
-                                }
-                        }
-                }
-        }
+	static {
+		Shared.loadJNI();
+	}
 
 	private native int alignForwardJNI(byte[] query, byte[] ref, int qstart, int rstart, int maxEdits, boolean exact, int maxWidth, byte[] baseToNumber, int[] returnVals);
 
@@ -66,7 +42,7 @@ public class BandedAlignerJNI extends BandedAligner{
 		edits=ba.alignForward(query, ref, (qstart==-1 ? 0 : qstart), (rstart==-1 ? 0 : rstart), maxedits, true);
 		System.out.println("Forward:    \tedits="+edits+", lastRow="+ba.lastRow+", score="+ba.score());
 		System.out.println("***********************\n");
-//		
+//
 //		edits=ba.alignForwardRC(query, ref, (qstart==-1 ? query.length-1 : qstart), (rstart==-1 ? 0 : rstart), maxedits, true);
 //		System.out.println("ForwardRC:  \tedits="+edits+", lastRow="+ba.lastRow+", score="+ba.score());
 //		System.out.println("***********************\n");
@@ -92,8 +68,9 @@ public class BandedAlignerJNI extends BandedAligner{
 	 * @param rstart
 	 * @return Edit distance
 	 */
+	@Override
 	public int alignForward(final byte[] query, final byte[] ref, final int qstart, final int rstart, final int maxEdits, final boolean exact){
-		int[] returnVals = new int[5];
+		int[] returnVals = KillSwitch.allocInt1D(5);
 		returnVals[0] = lastQueryLoc;
 		returnVals[1] = lastRefLoc;
 		returnVals[2] = lastRow;
@@ -115,8 +92,9 @@ public class BandedAlignerJNI extends BandedAligner{
 	 * @param rstart
 	 * @return Edit distance
 	 */
+	@Override
 	public int alignForwardRC(final byte[] query, final byte[] ref, final int qstart, final int rstart, final int maxEdits, final boolean exact){
-		int[] returnVals = new int[5];
+		int[] returnVals = KillSwitch.allocInt1D(5);
 		returnVals[0] = lastQueryLoc;
 		returnVals[1] = lastRefLoc;
 		returnVals[2] = lastRow;
@@ -138,8 +116,9 @@ public class BandedAlignerJNI extends BandedAligner{
 	 * @param rstart
 	 * @return Edit distance
 	 */
+	@Override
 	public int alignReverse(final byte[] query, final byte[] ref, final int qstart, final int rstart, final int maxEdits, final boolean exact){
-		int[] returnVals = new int[5];
+		int[] returnVals = KillSwitch.allocInt1D(5);
 		returnVals[0] = lastQueryLoc;
 		returnVals[1] = lastRefLoc;
 		returnVals[2] = lastRow;
@@ -161,8 +140,9 @@ public class BandedAlignerJNI extends BandedAligner{
 	 * @param rstart
 	 * @return Edit distance
 	 */
+	@Override
 	public int alignReverseRC(final byte[] query, final byte[] ref, final int qstart, final int rstart, final int maxEdits, final boolean exact){
-		int[] returnVals = new int[5];
+		int[] returnVals = KillSwitch.allocInt1D(5);
 		returnVals[0] = lastQueryLoc;
 		returnVals[1] = lastRefLoc;
 		returnVals[2] = lastRow;

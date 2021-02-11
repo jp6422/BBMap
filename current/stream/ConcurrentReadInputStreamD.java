@@ -3,7 +3,7 @@ package stream;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 
-import align2.Shared;
+import shared.Shared;
 import structures.ListNum;
 
 /**
@@ -449,7 +449,9 @@ public class ConcurrentReadInputStreamD extends ConcurrentReadInputStream {
 		if(master){source.setSampleRate(rate, seed);}
 	}
 	
+	@Override
 	public long basesIn(){return basesIn;}
+	@Override
 	public long readsIn(){return readsIn;}
 	
 	@Override
@@ -458,6 +460,7 @@ public class ConcurrentReadInputStreamD extends ConcurrentReadInputStream {
 		return errorState;
 	}
 	
+	@Override
 	public Object[] producers(){
 		if(master){return source.producers();}
 		return null;

@@ -2,9 +2,10 @@ package driver;
 
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
 import java.util.Map;
+
+import shared.Shared;
 
 /**
  * @author Brian Bushnell
@@ -20,7 +21,7 @@ public class PrintEnv {
 		
 		Map<String, String> env=System.getenv();
 		ArrayList<String> keys=new ArrayList<String>(env.keySet());
-		Collections.sort(keys);
+		Shared.sort(keys);
 		for(String s : keys){
 			System.out.println(s+"\t"+env.get(s));
 		}

@@ -1,16 +1,15 @@
 package driver;
 
-import java.io.File;
 import java.lang.Thread.State;
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
-import align2.Shared;
-import align2.Tools;
-
-import dna.Parser;
-import dna.Timer;
+import shared.Parse;
+import shared.PreParser;
+import shared.Shared;
+import shared.Timer;
 
 /**
  * @author Brian Bushnell
@@ -21,6 +20,12 @@ public class TestLockSpeed {
 	
 	public static void main(String[] args){
 		
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
+		
 		int mode=0;
 		long max=1000000000;
 		int threads=Shared.threads();
@@ -30,17 +35,13 @@ public class TestLockSpeed {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if(b==null || b.equalsIgnoreCase("null")){b=null;}
-			while(a.startsWith("-")){a=a.substring(1);} //In case people use hyphens
-
-			if(Parser.isJavaFlag(arg)){
-				//do nothing
-			}else if(a.equals("mode")){
+			
+			if(a.equals("mode")){
 				mode=Integer.parseInt(b);
 			}else if(a.equals("threads") || a.equals("t")){
 				threads=Integer.parseInt(b);
 			}else if(a.equals("max")){
-				max=Tools.parseKMG(b);
+				max=Parse.parseKMG(b);
 			}else{
 				System.err.println("Unknown parameter "+args[i]);
 				assert(false) : "Unknown parameter "+args[i];
@@ -81,7 +82,7 @@ public class TestLockSpeed {
 		t.stop();
 		System.out.println("Time:  \t"+t);
 		System.out.println("Count: \t"+box.value());
-		System.out.println("Speed: \t"+String.format("%.3f", (threads*max*1.0)/(t.elapsed))+" giga per second");
+		System.out.println("Speed: \t"+String.format(Locale.ROOT, "%.3f", (threads*max*1.0)/(t.elapsed))+" giga per second");
 		
 	}
 	
@@ -93,6 +94,7 @@ public class TestLockSpeed {
 			mode=mode_;
 		}
 		
+		@Override
 		public void run(){
 			if(mode==UNLOCKED){
 				final LockBox box=(LockBox)box0;
@@ -139,19 +141,25 @@ public class TestLockSpeed {
 	}
 	
 	static class LockBox extends CountBox{
+		@Override
 		synchronized void increment(){counter++;}
+		@Override
 		long value(){return counter;}
 		long counter;
 	}
 	
 	static class AtomBox extends CountBox{
+		@Override
 		void increment(){counter.incrementAndGet();}
+		@Override
 		long value(){return counter.longValue();}
 		AtomicLong counter=new AtomicLong(0);
 	}
 	
 	static class VolatileBox extends CountBox{
+		@Override
 		void increment(){updater.incrementAndGet(this);}
+		@Override
 		long value(){return counter;}
 		volatile long counter;
 		static final AtomicLongFieldUpdater<VolatileBox> updater=AtomicLongFieldUpdater.newUpdater(VolatileBox.class, "counter");

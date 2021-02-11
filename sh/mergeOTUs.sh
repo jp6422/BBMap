@@ -1,20 +1,20 @@
 #!/bin/bash
-#mergeOTUs in=<infile> out=<outfile>
 
-function usage(){
+usage(){
 echo "
 Written by Brian Bushnell
 Last modified January 21, 2015
 
-Description:  Merges coverage stats lines (from pileup) for the same OTU,
-              according to some custom naming scheme.
+Description:    Merges coverage stats lines (from pileup) for the same OTU,
+                according to some custom naming scheme.
 
-Usage:        mergeOTUs.sh in=<file> out=<file>
+Usage:          mergeOTUs.sh in=<file> out=<file>
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -29,7 +29,6 @@ popd > /dev/null
 CP="$DIR""current/"
 
 z="-Xmx1g"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -39,15 +38,13 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 }
 calcXmx "$@"
 
 function mergeOTUs() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module load oracle-jdk/1.7_64bit
-	fi
-	local CMD="java $EA $z -cp $CP driver.MergeCoverageOTU $@"
+	local CMD="java $EA $EOOM $z -cp $CP driver.MergeCoverageOTU $@"
 	echo $CMD >&2
 	eval $CMD
 }

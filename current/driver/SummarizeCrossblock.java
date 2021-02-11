@@ -3,15 +3,17 @@ package driver;
 import java.io.File;
 import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 
-import align2.Tools;
-import dna.Parser;
-import dna.Timer;
 import fileIO.FileFormat;
 import fileIO.ReadWrite;
 import fileIO.TextStreamWriter;
 import jgi.DecontaminateByNormalization;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 
 /**
  * @author Brian Bushnell
@@ -22,22 +24,24 @@ public class SummarizeCrossblock {
 	
 	public static void main(String[] args){
 		Timer t=new Timer();
-		SummarizeCrossblock sc=new SummarizeCrossblock(args);
-		sc.process(t);
+		SummarizeCrossblock x=new SummarizeCrossblock(args);
+		x.process(t);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(x.outstream);
 	}
 	
 	public SummarizeCrossblock(String[] args){
 		
-		args=Parser.parseConfig(args);
-		if(Parser.parseHelp(args, true)){
-			printOptions();
-			System.exit(0);
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
 		}
 		
-		for(String s : args){if(s.startsWith("out=standardout") || s.startsWith("out=stdout")){outstream=System.err;}}
-		outstream.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
-		
-		ReadWrite.USE_PIGZ=ReadWrite.USE_UNPIGZ=false;
+		ReadWrite.USE_PIGZ=false;
+		ReadWrite.USE_UNPIGZ=false;
+		ReadWrite.USE_UNBGZIP=false;
 		
 		Parser parser=new Parser();
 		for(int i=0; i<args.length; i++){
@@ -45,13 +49,11 @@ public class SummarizeCrossblock {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if(b==null || b.equalsIgnoreCase("null")){b=null;}
-			while(a.startsWith("-")){a=a.substring(1);} //In case people use hyphens
 
 			if(parser.parse(arg, a, b)){
 				//do nothing
 			}else if(a.equals("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 				ReadWrite.verbose=verbose;
 			}else if(parser.in1==null && i==0 && !arg.contains("=") && (arg.toLowerCase().startsWith("stdin") || new File(arg).exists())){
 				parser.in1=arg;
@@ -66,8 +68,6 @@ public class SummarizeCrossblock {
 		{//Process parser fields
 			Parser.processQuality();
 			
-			maxReads=parser.maxReads;
-			
 			overwrite=parser.overwrite;
 			append=parser.append;
 			
@@ -76,10 +76,7 @@ public class SummarizeCrossblock {
 			out1=parser.out1;
 		}
 		
-		if(in==null){
-			printOptions();
-			throw new RuntimeException("Error - at least one input file is required.");
-		}
+		if(in==null){throw new RuntimeException("Error - at least one input file is required.");}
 		
 		if(in.contains(",")){
 			for(String s : in.split(",")){
@@ -113,10 +110,10 @@ public class SummarizeCrossblock {
 				pcr=new ParseCrossblockResults(new String[] {"in="+fname});
 				Timer t2=new Timer();
 				pcr.process(t2);
-				tsw.print(fname+"\t"+i+"\t"+pcr.contigs()+"\t"+pcr.contigsDiscarded()+"\t"+pcr.bases()+"\t"+pcr.basesDiscarded()+"\n");
+				if(tsw!=null){tsw.print(fname+"\t"+i+"\t"+pcr.contigs()+"\t"+pcr.contigsDiscarded()+"\t"+pcr.bases()+"\t"+pcr.basesDiscarded()+"\n");}
 			}catch(Throwable e){
 				System.err.println(e);
-				tsw.print(fname+"\tERROR\n");
+				if(tsw!=null){tsw.print(fname+"\tERROR\n");}
 			}
 			i++;
 		}
@@ -125,16 +122,12 @@ public class SummarizeCrossblock {
 
 	/*--------------------------------------------------------------*/
 	
-	private void printOptions(){assert(false) : "printOptions: TODO";}
-	
 	/*--------------------------------------------------------------*/
 	
 	private ArrayList<String> inList=new ArrayList<String>();
 	private String out1=null;
 	
 	/*--------------------------------------------------------------*/
-
-	private long maxReads=-1;
 
 	private long basesKept=0;
 	private long basesDiscarded=0;

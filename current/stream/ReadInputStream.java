@@ -2,7 +2,46 @@ package stream;
 
 import java.util.ArrayList;
 
+import fileIO.FileFormat;
+import fileIO.ReadWrite;
+import structures.ListNum;
+
 public abstract class ReadInputStream {
+	
+	public static final ArrayList<Read> toReads(String fname, int defaultFormat, long maxReads){
+		if(fname==null){return null;}
+		FileFormat ff=FileFormat.testInput(fname, defaultFormat, null, false, true);
+		return toReads(ff, maxReads);
+	}
+	
+	public static final Read[] toReadArray(FileFormat ff, long maxReads){
+		ArrayList<Read> list=toReads(ff, maxReads);
+		return list==null ? null : list.toArray(new Read[0]);
+	}
+	
+	public static final ArrayList<Read> toReads(FileFormat ff, long maxReads){
+		ArrayList<Read> list=new ArrayList<Read>();
+
+		/* Start an input stream */
+		ConcurrentReadInputStream cris=ConcurrentReadInputStream.getReadInputStream(maxReads, false, ff, null);
+		cris.start(); //4567
+		ListNum<Read> ln=cris.nextList();
+		ArrayList<Read> reads=(ln!=null ? ln.list : null);
+
+		/* Iterate through read lists from the input stream */
+		while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
+			list.addAll(reads);
+			
+			/* Dispose of the old list and fetch a new one */
+			cris.returnList(ln);
+			ln=cris.nextList();
+			reads=(ln!=null ? ln.list : null);
+		}
+		/* Cleanup */
+		cris.returnList(ln);
+		ReadWrite.closeStream(cris);
+		return list;
+	}
 	
 
 	public abstract Read next();

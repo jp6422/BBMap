@@ -3,26 +3,28 @@ package jgi;
 import java.io.File;
 import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 
-import stream.ConcurrentGenericReadInputStream;
-import stream.ConcurrentReadInputStream;
-import stream.FASTQ;
-import stream.FastaReadInputStream;
-import stream.ConcurrentReadOutputStream;
-import stream.Read;
-import structures.ListNum;
 import dna.AminoAcid;
-import dna.Parser;
-import dna.Timer;
 import fileIO.ByteFile;
 import fileIO.ByteFile1;
 import fileIO.ByteFile2;
-import fileIO.ReadWrite;
 import fileIO.FileFormat;
-import align2.ReadStats;
-import align2.Shared;
-import align2.Tools;
+import fileIO.ReadWrite;
+import shared.KillSwitch;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
+import stream.ConcurrentGenericReadInputStream;
+import stream.ConcurrentReadInputStream;
+import stream.ConcurrentReadOutputStream;
+import stream.FASTQ;
+import stream.FastaReadInputStream;
+import stream.Read;
+import structures.ListNum;
 /**
  * @author Brian Bushnell
  * @date Sep 11, 2012
@@ -32,39 +34,35 @@ public class FakeReads {
 
 	public static void main(String[] args){
 		Timer t=new Timer();
-		FakeReads rr=new FakeReads(args);
-		rr.process(t);
+		FakeReads x=new FakeReads(args);
+		x.process(t);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(x.outstream);
 	}
 	
 	public FakeReads(String[] args){
-		if(args==null || args.length==0){
-			printOptions();
-			System.exit(0);
+		
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
 		}
 		
-		for(String s : args){if(s.startsWith("out=standardout") || s.startsWith("out=stdout")){outstream=System.err;}}
-		outstream.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
-		
 		FASTQ.FORCE_INTERLEAVED=FASTQ.TEST_INTERLEAVED=false;
-
 		
-		
-		Shared.READ_BUFFER_LENGTH=Tools.min(200, Shared.READ_BUFFER_LENGTH);
 		Shared.capBuffers(4);
 		ReadWrite.USE_PIGZ=ReadWrite.USE_UNPIGZ=true;
 		ReadWrite.MAX_ZIP_THREADS=Shared.threads();
-		ReadWrite.ZIP_THREAD_DIVISOR=1;
+		
 		
 		for(int i=0; i<args.length; i++){
 			String arg=args[i];
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			while(a.startsWith("-")){a=a.substring(1);} //In case people use hyphens
-
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(Parser.parseCommonStatic(arg, a, b)){
+			
+			if(Parser.parseCommonStatic(arg, a, b)){
 				//do nothing
 			}else if(Parser.parseZip(arg, a, b)){
 				//do nothing
@@ -76,18 +74,17 @@ public class FakeReads {
 				assert(false) : "'passes' is disabled.";
 //				passes=Integer.parseInt(b);
 			}else if(a.equals("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 				ByteFile1.verbose=verbose;
 				ByteFile2.verbose=verbose;
 				stream.FastaReadInputStream.verbose=verbose;
 				ConcurrentGenericReadInputStream.verbose=verbose;
-//				align2.FastaReadInputStream2.verbose=verbose;
 				stream.FastqReadInputStream.verbose=verbose;
 				ReadWrite.verbose=verbose;
 			}else if(a.equals("addspacer") || a.equals("addspace") || a.equals("usespacer")){
-				addSpacer=Tools.parseBoolean(b);
+				addSpacer=Parse.parseBoolean(b);
 			}else if(a.equals("reads") || a.equals("maxreads")){
-				maxReads=Tools.parseKMG(b);
+				maxReads=Parse.parseKMG(b);
 			}else if(a.equals("t") || a.equals("threads")){
 				Shared.setThreads(b);
 			}else if(a.equals("in") || a.equals("input") || a.equals("in1") || a.equals("input1")){
@@ -109,9 +106,9 @@ public class FakeReads {
 			}else if(a.equals("extout")){
 				extout=b;
 			}else if(a.equals("append") || a.equals("app")){
-				append=ReadStats.append=Tools.parseBoolean(b);
+				append=ReadStats.append=Parse.parseBoolean(b);
 			}else if(a.equals("overwrite") || a.equals("ow")){
-				overwrite=Tools.parseBoolean(b);
+				overwrite=Parse.parseBoolean(b);
 			}else if(a.startsWith("minscaf") || a.startsWith("mincontig")){
 				stream.FastaReadInputStream.MIN_READ_LEN=Integer.parseInt(b);
 			}else if(a.equals("ml") || a.equals("minlen") || a.equals("minlength")){
@@ -119,13 +116,13 @@ public class FakeReads {
 			}else if(a.equals("length") || a.equals("maxlen") || a.equals("length")){
 				desiredLength=Integer.parseInt(b);
 			}else if(a.equals("split")){
-				SPLITMODE=Tools.parseBoolean(b);
+				SPLITMODE=Parse.parseBoolean(b);
 			}else if(a.equals("overlap")){
 				SPLITMODE=true;
 				overlap=Integer.parseInt(b);
 			}else if(in1==null && i==0 && !arg.contains("=") && (arg.toLowerCase().startsWith("stdin") || new File(arg).exists())){
 				in1=arg;
-				if(arg.indexOf('#')>-1 && !new File(arg).exists()){
+				if(arg.indexOf('#')>-1 && !new File(arg).exists() && b!=null){//b!=null is implied
 					in1=b.replace("#", "1");
 				}
 			}else{
@@ -159,23 +156,13 @@ public class FakeReads {
 		
 		assert(FastaReadInputStream.settingsOK());
 		
-		if(in1==null){
-			printOptions();
-			throw new RuntimeException("Error - at least one input file is required.");
-		}
+		if(in1==null){throw new RuntimeException("Error - at least one input file is required.");}
 		if(!ByteFile.FORCE_MODE_BF1 && !ByteFile.FORCE_MODE_BF2 && Shared.threads()>2){
 //			if(ReadWrite.isCompressed(in1)){ByteFile.FORCE_MODE_BF2=true;}
 			ByteFile.FORCE_MODE_BF2=true;
 		}
 		
-		if(out1==null){
-			if(out2!=null){
-				printOptions();
-				throw new RuntimeException("Error - cannot define out2 without defining out1.");
-			}
-			System.err.println("No output stream specified.  To write to stdout, please specify 'out=stdout.fq' or similar.");
-//			out1="stdout";
-		}
+		if(out1==null && out2!=null){throw new RuntimeException("Error - cannot define out2 without defining out1.");}
 
 		if(out1!=null && out1.equalsIgnoreCase("null")){out1=null;}
 		if(out2!=null && out2.equalsIgnoreCase("null")){out2=null;}
@@ -184,7 +171,7 @@ public class FakeReads {
 			throw new RuntimeException("\n\noverwrite="+overwrite+"; Can't write to output files "+out1+", "+out2+"\n");
 		}
 		
-		ffout1=FileFormat.testOutput(out1, FileFormat.FASTQ, extout, true, overwrite, append, false);  
+		ffout1=FileFormat.testOutput(out1, FileFormat.FASTQ, extout, true, overwrite, append, false);
 		ffout2=FileFormat.testOutput(out2, FileFormat.FASTQ, extout, true, overwrite, append, false);
 
 		ffin1=FileFormat.testInput(in1, FileFormat.FASTQ, extin, true, true);
@@ -208,7 +195,7 @@ public class FakeReads {
 			
 			if(cris.paired() && out2==null && (in1==null || !in1.contains(".sam"))){
 				outstream.println("Writing interleaved.");
-			}			
+			}
 
 			assert(!out1.equalsIgnoreCase(in1) && !out1.equalsIgnoreCase(in1)) : "Input file and output file have same name.";
 			assert(out2==null || (!out2.equalsIgnoreCase(in1) && !out2.equalsIgnoreCase(out1))) : "out1 and out2 have same name.";
@@ -230,7 +217,7 @@ public class FakeReads {
 				assert((ffin1==null || ffin1.samOrBam()) || (r.mate!=null)==cris.paired());
 			}
 
-			while(reads!=null && reads.size()>0){
+			while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
 				ArrayList<Read> fake=new ArrayList<Read>(reads.size());
 
 				for(int idx=0; idx<reads.size(); idx++){
@@ -249,21 +236,21 @@ public class FakeReads {
 						int len=Tools.min(r.length(), desiredLength);
 						if(SPLITMODE){len=Tools.min(r.length(), (r.length()+overlap+1)/2);}
 						
-						byte[] bases1=Arrays.copyOfRange(r.bases, 0, len);
-						byte[] bases2=Arrays.copyOfRange(r.bases, r.length()-len, r.length());
+						byte[] bases1=KillSwitch.copyOfRange(r.bases, 0, len);
+						byte[] bases2=KillSwitch.copyOfRange(r.bases, r.length()-len, r.length());
 						AminoAcid.reverseComplementBasesInPlace(bases2);
 						
 						byte[] qual1=null;
 						byte[] qual2=null;
 						if(r.quality!=null){
-							qual1=Arrays.copyOfRange(r.quality, 0, len);
-							qual2=Arrays.copyOfRange(r.quality, r.quality.length-len, r.quality.length);
+							qual1=KillSwitch.copyOfRange(r.quality, 0, len);
+							qual2=KillSwitch.copyOfRange(r.quality, r.quality.length-len, r.quality.length);
 							Tools.reverseInPlace(qual2);
 						}
 						
 //						public Read(byte[] s_, int chrom_, int start_, int stop_, String id_, byte[] quality_, long numericID_, int flags_){
-						Read a=new Read(bases1, -1, -1, -1, identifier+r.numericID+spacer+"/1", qual1, r.numericID, 0);
-						Read b=new Read(bases2, -1, -1, -1, identifier+r.numericID+spacer+"/2", qual2, r.numericID, 0);
+						Read a=new Read(bases1, qual1, identifier+r.numericID+spacer+"/1", r.numericID, 0);
+						Read b=new Read(bases2, qual2, identifier+r.numericID+spacer+"/2", r.numericID, Read.PAIRNUMMASK);
 						a.mate=b;
 						b.mate=a;
 						fake.add(a);
@@ -272,7 +259,7 @@ public class FakeReads {
 				
 				if(ros!=null){ros.add(fake, ln.id);}
 
-				cris.returnList(ln.id, ln.list.isEmpty());
+				cris.returnList(ln);
 				ln=cris.nextList();
 				reads=(ln!=null ? ln.list : null);
 			}
@@ -284,19 +271,7 @@ public class FakeReads {
 		errorState|=ReadWrite.closeStreams(cris, ros);
 		
 		t.stop();
-
-		double rpnano=readsProcessed/(double)(t.elapsed);
-		double bpnano=basesProcessed/(double)(t.elapsed);
-
-		String rpstring=(readsProcessed<100000 ? ""+readsProcessed : readsProcessed<100000000 ? (readsProcessed/1000)+"k" : (readsProcessed/1000000)+"m");
-		String bpstring=(basesProcessed<100000 ? ""+basesProcessed : basesProcessed<100000000 ? (basesProcessed/1000)+"k" : (basesProcessed/1000000)+"m");
-
-		while(rpstring.length()<8){rpstring=" "+rpstring;}
-		while(bpstring.length()<8){bpstring=" "+bpstring;}
-		
-		outstream.println("Time:                         \t"+t);
-		outstream.println("Reads Processed:    "+rpstring+" \t"+String.format("%.2fk reads/sec", rpnano*1000000));
-		outstream.println("Bases Processed:    "+bpstring+" \t"+String.format("%.2fm bases/sec", bpnano*1000));
+		outstream.println(Tools.timeReadsBasesProcessed(t, readsProcessed, basesProcessed, 8));
 		
 		if(errorState){
 			throw new RuntimeException("FakeReads terminated in an error state; the output may be corrupt.");
@@ -304,20 +279,6 @@ public class FakeReads {
 	}
 	
 	/*--------------------------------------------------------------*/
-	
-	private void printOptions(){
-		outstream.println("Syntax:\n");
-		outstream.println("java -ea -Xmx512m -cp <path> jgi.FakeReads in=<infile> out=<outfile> out2=<outfile2>");
-		outstream.println("\nout2 is optional.  \nIf output is paired and there is only one output file, it will be written interleaved.\n");
-		outstream.println("Other parameters and their defaults:\n");
-		outstream.println("overwrite=false  \tOverwrites files that already exist");
-		outstream.println("ziplevel=5       \tSet compression level, 1 (low) to 9 (max)");
-		outstream.println("interleaved=false\tDetermines whether input file is considered interleaved");
-		outstream.println("fastawrap=70     \tLength of lines in fasta output");
-		outstream.println("qin=auto         \tASCII offset for input quality.  May be set to 33 (Sanger), 64 (Illumina), or auto");
-		outstream.println("qout=auto        \tASCII offset for output quality.  May be set to 33 (Sanger), 64 (Illumina), or auto (meaning same as input)");
-	}
-	
 	
 	/*--------------------------------------------------------------*/
 	

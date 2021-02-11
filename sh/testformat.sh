@@ -1,22 +1,24 @@
 #!/bin/bash
-#testformat in=<infile>
 
 usage(){
 echo "
 Written by Brian Bushnell
-Last modified June 29, 2015
+Last modified August 4, 2016
 
-Description:  Tests file extensions and contents to determine format, quality, compression, interleaving, and read length.
+Description:  Tests file extensions and contents to determine format,
+quality, compression, interleaving, and read length.  More than one file
+may be specified.  Note that ASCII-33 (sanger) and ASCII-64 
+(old Illumina/Solexa) cannot always be differentiated.
 
-Usage:        testformat.sh <file>
+Usage:  testformat.sh <file>
 
-More than one file may be specified.
-Note that ASCII-33 (sanger) and ASCII-64 (illumina) cannot always be differentiated.
+See also:  testformat2.sh, stats.sh
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -31,7 +33,6 @@ popd > /dev/null
 CP="$DIR""current/"
 
 z="-Xmx120m"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -41,16 +42,13 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 }
 calcXmx "$@"
 
 testformat() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-	fi
-	local CMD="java $EA $z -cp $CP fileIO.FileFormat $@"
+	local CMD="java $EA $EOOM $z -cp $CP fileIO.FileFormat $@"
 #	echo $CMD >&2
 	eval $CMD
 }

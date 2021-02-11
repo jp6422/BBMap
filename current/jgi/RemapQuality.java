@@ -1,8 +1,9 @@
 package jgi;
 
+import shared.Timer;
 import stream.Read;
 import stream.SamLine;
-import dna.Timer;
+import template.BBTool_ST;
 
 /**
  * Changes quality scores to other quality scores.
@@ -24,7 +25,8 @@ public class RemapQuality extends BBTool_ST {
 		bbt.process(t);
 	}
 	
-	void setDefaults(){}
+	@Override
+	protected void setDefaults(){}
 
 	/**
 	 * @param args
@@ -70,7 +72,7 @@ public class RemapQuality extends BBTool_ST {
 	 * @see jgi.BBTool_ST#startupSubclass()
 	 */
 	@Override
-	void startupSubclass() {
+	protected void startupSubclass() {
 		// TODO Auto-generated method stub
 
 	}
@@ -79,7 +81,7 @@ public class RemapQuality extends BBTool_ST {
 	 * @see jgi.BBTool_ST#shutdownSubclass()
 	 */
 	@Override
-	void shutdownSubclass() {
+	protected void shutdownSubclass() {
 		// TODO Auto-generated method stub
 
 	}
@@ -88,16 +90,19 @@ public class RemapQuality extends BBTool_ST {
 	 * @see jgi.BBTool_ST#showStatsSubclass(dna.Timer, long, long)
 	 */
 	@Override
-	void showStatsSubclass(Timer t, long readsIn, long basesIn) {
+	protected void showStatsSubclass(Timer t, long readsIn, long basesIn) {
 		// TODO Auto-generated method stub
 
 	}
+	
+	@Override
+	protected final boolean useSharedHeader(){return true;}
 
 	/* (non-Javadoc)
 	 * @see jgi.BBTool_ST#processReadPair(stream.Read, stream.Read)
 	 */
 	@Override
-	boolean processReadPair(Read r1, Read r2) {
+	protected boolean processReadPair(Read r1, Read r2) {
 		if(r1!=null && r1.quality!=null){
 			final byte[] qual=r1.quality;
 			for(int i=0; i<qual.length; i++){qual[i]=map[qual[i]];}

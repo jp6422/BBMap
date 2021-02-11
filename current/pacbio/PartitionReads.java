@@ -1,22 +1,21 @@
 package pacbio;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 
-import stream.ConcurrentGenericReadInputStream;
+import dna.Data;
+import fileIO.FileFormat;
+import fileIO.ReadWrite;
+import fileIO.TextStreamWriter;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Timer;
 import stream.ConcurrentReadInputStream;
-import stream.FASTQ;
 import stream.FastaReadInputStream;
 import stream.Read;
+import structures.ByteBuilder;
 import structures.ListNum;
-import align2.ReadStats;
-import align2.Tools;
-import dna.Data;
-import dna.Parser;
-import dna.Timer;
-import fileIO.ReadWrite;
-import fileIO.FileFormat;
-import fileIO.TextStreamWriter;
 
 /**
  * @author Brian Bushnell
@@ -26,19 +25,19 @@ import fileIO.TextStreamWriter;
 public class PartitionReads {
 
 	public static void main(String[] args){
-		System.err.println("Executing "+(new Object() { }.getClass().getEnclosingClass().getName())+" "+Arrays.toString(args)+"\n");
-		
-		
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
 		
 		Timer t=new Timer();
 		
 		boolean verbose=false;
 		int ziplevel=-1;
-
 		String in1=null;
 		String in2=null;
 		long maxReads=-1;
-		
 		String outname1=null;
 		String outname2=null;
 		
@@ -46,13 +45,9 @@ public class PartitionReads {
 			final String arg=args[i];
 			final String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
-			String b=split.length>1 ? split[1] : "true";
-			if("null".equalsIgnoreCase(b)){b=null;}
-//			System.err.println("Processing "+args[i]);
+			String b=split.length>1 ? split[1] : null;
 			
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(Parser.parseCommonStatic(arg, a, b)){
+			if(Parser.parseCommonStatic(arg, a, b)){
 				//do nothing
 			}else if(Parser.parseZip(arg, a, b)){
 				//do nothing
@@ -73,12 +68,12 @@ public class PartitionReads {
 			}else if(a.startsWith("partition")){
 				partitions=Integer.parseInt(b);
 			}else if(a.equals("append") || a.equals("app")){
-				append=ReadStats.append=Tools.parseBoolean(b);
+				append=ReadStats.append=Parse.parseBoolean(b);
 			}else if(a.equals("overwrite") || a.equals("ow")){
-				overwrite=Tools.parseBoolean(b);
+				overwrite=Parse.parseBoolean(b);
 				System.out.println("Set overwrite to "+overwrite);
 			}else if(a.equals("reads") || a.equals("maxreads")){
-				maxReads=Tools.parseKMG(b);
+				maxReads=Parse.parseKMG(b);
 			}else if(a.equals("out") || a.equals("out1")){
 				if(b==null || b.equalsIgnoreCase("null") || b.equalsIgnoreCase("none") || split.length==1){
 					System.out.println("No output file.");
@@ -95,7 +90,7 @@ public class PartitionReads {
 					assert(!outname2.equalsIgnoreCase(outname1));
 				}
 			}else if(a.startsWith("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 			}else{
 				throw new RuntimeException("Unknown parameter: "+args[i]);
 			}
@@ -166,7 +161,7 @@ public class PartitionReads {
 					final Read r2=r.mate;
 					final int mod=(int)(x%div);
 					
-					StringBuilder a=null, b=null;
+					ByteBuilder a=null, b=null;
 					
 					if(fastq){
 						a=r.toFastq();
@@ -176,7 +171,7 @@ public class PartitionReads {
 						if(paired){b=r2.toFasta();}
 					}else if(bread){
 						a=r.toText(true);
-						if(paired){b=(r2==null ? new StringBuilder(".") : r2.toText(true));}
+						if(paired){b=(r2==null ? new ByteBuilder(".") : r2.toText(true));}
 					}else{
 						throw new RuntimeException("Unsupported output format.");
 					}

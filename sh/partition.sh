@@ -1,10 +1,9 @@
 #!/bin/bash
-#partition in=<infile> out=<outfile>
 
-function usage(){
+usage(){
 echo "
 Written by Brian Bushnell
-Last modified June 16, 2016
+Last modified May 22, 2019
 
 Description:  Splits a sequence file evenly into multiple files.
 
@@ -16,28 +15,29 @@ Output filenames MUST contain a '%' symbol.  This will be replaced by a number.
 
 Parameters and their defaults:
 
-in=<file>           Input file.
-out=<file>          Output file pattern.
-ways=-1             The number of output files to create; must be positive.
+in=<file>       Input file.
+out=<file>      Output file pattern.
+ways=-1         The number of output files to create; must be positive.
+pacbio=f        Set to true to keep PacBio subreads together.
 
-ow=f                (overwrite) Overwrites files that already exist.
-app=f               (append) Append to files that already exist.
-zl=4                (ziplevel) Set compression level, 1 (low) to 9 (max).
-int=f               (interleaved) Determines whether INPUT file is considered interleaved.
+ow=f            (overwrite) Overwrites files that already exist.
+app=f           (append) Append to files that already exist.
+zl=4            (ziplevel) Set compression level, 1 (low) to 9 (max).
+int=f           (interleaved) Determines whether INPUT file is considered interleaved.
 
 Java Parameters:
--Xmx                This will be passed to Java to set memory usage, overriding the program's automatic memory detection.
-                    -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.  The max is typically 85% of physical memory.
-
-Supported input formats are fastq, fasta, fasta+qual, and scarf.
-Supported output formats are fastq, fasta, fasta+qual, .sam, and bam (bam only if samtools is installed).
-Supported compression formats are gzip and bz2.
-To read from stdin, set 'in=stdin'.  The format should be specified with an extension, like 'in=stdin.fq.gz'
+-Xmx            This will set Java's memory usage, overriding autodetection.
+                -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.
+                    The max is typically 85% of physical memory.
+-eoom           This flag will cause the process to exit if an out-of-memory
+                exception occurs.  Requires Java 8u92+.
+-da             Disable assertions.
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -51,8 +51,7 @@ popd > /dev/null
 #DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/"
 CP="$DIR""current/"
 
-z="-Xmx400m"
-EA="-ea"
+z="-Xmx1g"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -62,19 +61,13 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 }
 calcXmx "$@"
 
 function partition() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module unload samtools
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-		module load samtools
-	fi
-	local CMD="java $EA $z -cp $CP jgi.PartitionReads $@"
+	local CMD="java $EA $EOOM $z -cp $CP jgi.PartitionReads $@"
 	echo $CMD >&2
 	eval $CMD
 }

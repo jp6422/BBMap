@@ -3,10 +3,10 @@ package jgi;
 import java.util.ArrayList;
 import java.util.Random;
 
-import align2.Tools;
-
 import dna.AminoAcid;
-import dna.Timer;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 
 /**
  * @author Brian Bushnell
@@ -72,7 +72,7 @@ public class GreedyBarCodeFinder {
 			set=new int[(int)space];
 			for(int i=0; i<set.length; i++){set[i]=i;}
 		}
-		Random randy=new Random();
+		Random randy=Shared.threadLocalRandom();
 		for(int i=0; i<set.length; i++){
 			int x=i+randy.nextInt(set.length-i);
 			int temp=set[i];

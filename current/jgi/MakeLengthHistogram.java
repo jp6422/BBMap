@@ -1,21 +1,25 @@
 package jgi;
 
-import java.io.File;
+import java.io.PrintStream;
 import java.util.ArrayList;
+import java.util.Locale;
 
+import dna.Data;
+import fileIO.FileFormat;
+import fileIO.ReadWrite;
+import fileIO.TextStreamWriter;
+import shared.MetadataWriter;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 import stream.ConcurrentReadInputStream;
 import stream.FastaReadInputStream;
 import stream.Read;
 import structures.ListNum;
-import dna.Data;
-import dna.Parser;
-import dna.Timer;
-import fileIO.FileFormat;
-import fileIO.ReadWrite;
-import fileIO.TextStreamWriter;
-import align2.ReadStats;
-import align2.Shared;
-import align2.Tools;
 
 /**
  * @author Brian Bushnell
@@ -25,6 +29,13 @@ import align2.Tools;
 public class MakeLengthHistogram {
 	
 	public static void main(String[] args){
+
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
+		}
+		
 		Timer t=new Timer();
 		
 		String in1=null, in2=null;
@@ -32,7 +43,7 @@ public class MakeLengthHistogram {
 		
 		Data.GENOME_BUILD=-1;
 		ReadWrite.USE_UNPIGZ=true;
-		Shared.READ_BUFFER_LENGTH=Tools.mid(1, Shared.READ_BUFFER_LENGTH, 20);
+		Shared.capBufferLen(20);
 		
 		/* Parse arguments */
 		for(int i=0; i<args.length; i++){
@@ -41,21 +52,17 @@ public class MakeLengthHistogram {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if("null".equalsIgnoreCase(b)){b=null;}
-			while(a.charAt(0)=='-' && (a.indexOf('.')<0 || i>1 || !new File(a).exists())){a=a.substring(1);}
 			
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(Parser.parseZip(arg, a, b)){
+			if(Parser.parseZip(arg, a, b)){
 				//do nothing
 			}else if(Parser.parseQuality(arg, a, b)){
 				//do nothing
 			}else if(a.equals("reads") || a.equals("maxreads")){
-				maxReads=Tools.parseKMG(b);
+				maxReads=Parse.parseKMG(b);
 			}else if(a.equals("append") || a.equals("app")){
-				append=ReadStats.append=Tools.parseBoolean(b);
+				append=ReadStats.append=Parse.parseBoolean(b);
 			}else if(a.equals("overwrite") || a.equals("ow")){
-				overwrite=Tools.parseBoolean(b);
+				overwrite=Parse.parseBoolean(b);
 			}else if(a.equals("in") || a.equals("in1")){
 				in1=b;
 			}else if(a.equals("in2")){
@@ -65,11 +72,11 @@ public class MakeLengthHistogram {
 			}else if(a.equals("max") || a.equals("maxlength")){
 				MAX_LENGTH=Integer.parseInt(b);
 			}else if(a.equals("nzo") || a.equals("nonzeroonly")){
-				NON_ZERO_ONLY=Tools.parseBoolean(b);
+				NON_ZERO_ONLY=Parse.parseBoolean(b);
 			}else if(a.startsWith("mult") || a.startsWith("div") || a.startsWith("bin")){
 				MULT=Integer.parseInt(b);
 			}else if(a.equals("round")){
-				ROUND_BINS=Tools.parseBoolean(b);
+				ROUND_BINS=Parse.parseBoolean(b);
 			}else if(i==0 && !arg.contains("=")){
 				in1=arg;
 			}else if(i==1 && !arg.contains("=")){
@@ -89,7 +96,11 @@ public class MakeLengthHistogram {
 		
 		calc(in1, in2, out);
 		t.stop();
-		System.err.println("Time: \t"+t);
+		outstream.println("Time: \t"+t);
+		MetadataWriter.write(null, readsProcessed, basesProcessed, 0, 0, false);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(outstream);
 	}
 	
 	public static void calc(String in1, String in2, String out){
@@ -101,11 +112,11 @@ public class MakeLengthHistogram {
 			FileFormat ff1=FileFormat.testInput(in1, FileFormat.FASTQ, null, true, true);
 			FileFormat ff2=FileFormat.testInput(in2, FileFormat.FASTQ, null, true, true);
 			cris=ConcurrentReadInputStream.getReadInputStream(maxReads, true, ff1, ff2);
-//			if(verbose){System.err.println("Started cris");}
+//			if(verbose){outstream.println("Started cris");}
 			cris.start(); //4567
 		}
 		boolean paired=cris.paired();
-//		if(verbose){System.err.println("Paired: "+paired);}
+//		if(verbose){outstream.println("Paired: "+paired);}
 		
 		
 		final int max=MAX_LENGTH;
@@ -124,8 +135,8 @@ public class MakeLengthHistogram {
 				assert(paired==(r.mate!=null));
 			}
 			
-			while(reads!=null && reads.size()>0){
-				//System.err.println("reads.size()="+reads.size());
+			while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
+				//outstream.println("reads.size()="+reads.size());
 				for(Read r1 : reads){
 					final Read r2=r1.mate;
 					
@@ -134,6 +145,7 @@ public class MakeLengthHistogram {
 					if(r1!=null && r1.bases!=null){
 						readsProcessed++;
 						final int x=r1.length();
+						basesProcessed+=x;
 						final int y=Tools.min(max, ((ROUND_BINS ? x+MULT/2 : x))/MULT);
 						readHist[y]++;
 						baseHist[y]+=x;
@@ -144,6 +156,7 @@ public class MakeLengthHistogram {
 					if(r2!=null && r2.bases!=null){
 						readsProcessed++;
 						final int x=r2.length();
+						basesProcessed+=x;
 						final int y=Tools.min(max, ((ROUND_BINS ? x+MULT/2 : x))/MULT);
 						readHist[y]++;
 						baseHist[y]+=x;
@@ -152,24 +165,24 @@ public class MakeLengthHistogram {
 					}
 					
 				}
-				//System.err.println("returning list");
-				cris.returnList(ln.id, ln.list.isEmpty());
-				//System.err.println("fetching list");
+				//outstream.println("returning list");
+				cris.returnList(ln);
+				//outstream.println("fetching list");
 				ln=cris.nextList();
 				reads=(ln!=null ? ln.list : null);
 			}
-			if(verbose){System.err.println("Finished reading");}
-			cris.returnList(ln.id, ln.list.isEmpty());
-			if(verbose){System.err.println("Returned list");}
+			if(verbose){outstream.println("Finished reading");}
+			cris.returnList(ln);
+			if(verbose){outstream.println("Returned list");}
 			ReadWrite.closeStream(cris);
-			if(verbose){System.err.println("Closed stream");}
-			System.err.println("Processed "+readsProcessed+" reads.");
+			if(verbose){outstream.println("Closed stream");}
+			outstream.println("Processed "+readsProcessed+" reads.");
 		}
 		
 		if(readsProcessed<1){minFound=0;}
 		double stdev=Tools.standardDeviationHistogram(readHist)*MULT;
-		int median=Tools.percentile(readHist, 0.5)*MULT;
-		int mode=Tools.calcMode(readHist)*MULT;
+		int median=Tools.percentileHistogram(readHist, 0.5)*MULT;
+		int mode=Tools.calcModeHistogram(readHist)*MULT;
 
 		double[] readHistF=new double[max+1];
 		long[] readHistC=new long[max+1];
@@ -199,16 +212,16 @@ public class MakeLengthHistogram {
 		tsw.println("#Bases:\t"+baseHistC[0]);
 		tsw.println("#Max:\t"+maxFound);
 		tsw.println("#Min:\t"+minFound);
-		tsw.println("#Avg:\t"+String.format("%.1f",(baseHistC[0]*1d/readsProcessed)));
+		tsw.println("#Avg:\t"+String.format(Locale.ROOT, "%.1f",(baseHistC[0]*1d/readsProcessed)));
 		tsw.println("#Median:\t"+median);
 		tsw.println("#Mode:\t"+mode);
-		tsw.println("#Std_Dev:\t"+String.format("%.1f",stdev));
+		tsw.println("#Std_Dev:\t"+String.format(Locale.ROOT, "%.1f",stdev));
 		tsw.println("#Read Length Histogram:");
 		tsw.println("#Length\treads\tpct_reads\tcum_reads\tcum_pct_reads\tbases\tpct_bases\tcum_bases\tcum_pct_bases");
 		for(int i=0; i<=max; i++){
 			if(readHist[i]>0 || !NON_ZERO_ONLY){
-				tsw.println((i*MULT)+"\t"+readHist[i]+String.format("\t%.3f%%", readHistF[i])+"\t"+readHistC[i]+String.format("\t%.3f%%", readHistCF[i])+
-						"\t"+baseHist[i]+String.format("\t%.3f%%", baseHistF[i])+"\t"+baseHistC[i]+String.format("\t%.3f%%", baseHistCF[i]));
+				tsw.println((i*MULT)+"\t"+readHist[i]+String.format(Locale.ROOT, "\t%.3f%%", readHistF[i])+"\t"+readHistC[i]+String.format(Locale.ROOT, "\t%.3f%%", readHistCF[i])+
+						"\t"+baseHist[i]+String.format(Locale.ROOT, "\t%.3f%%", baseHistF[i])+"\t"+baseHistC[i]+String.format(Locale.ROOT, "\t%.3f%%", baseHistCF[i]));
 			}
 			if(i*MULT>=maxFound){break;}
 		}
@@ -217,10 +230,13 @@ public class MakeLengthHistogram {
 	
 	public static long maxReads=-1;
 	public static long readsProcessed=0;
+	public static long basesProcessed=0;
 	public static int MAX_LENGTH=80000;
 	public static int MULT=10;
 	public static boolean ROUND_BINS=false;
-	public static boolean NON_ZERO_ONLY=false;
+	public static boolean NON_ZERO_ONLY=true;
+	
+	static PrintStream outstream=System.err;
 	
 	public static boolean append=false;
 	public static boolean overwrite=true;

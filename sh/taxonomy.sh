@@ -1,36 +1,60 @@
 #!/bin/bash
-#taxonomy in=<infile> out=<outfile>
 
 usage(){
 echo "
 Written by Brian Bushnell
-Last modified May 11, 2016
+Last modified Jan 7, 2020
 
 Description:   Prints the full taxonomy of a string.
 String may be a gi number, NCBI taxID, or Latin name.
 An NCBI identifier should just be a number or ncbi|number.
 A gi number should be gi|number.
+Please read bbmap/docs/guides/TaxonomyGuide.txt for more information.
+Not: It is more convenient to use taxonomy.jgi-psf.org.
 
 Usage:  taxonomy.sh tree=<tree file> <identifier>
+Alternate usage: taxonomy.sh tree=<tree file> in=<file>
 
-For example, taxonomy.sh tree=tree.taxtree.gz homo_sapiens
+Usage examples:
+taxonomy.sh tree=tree.taxtree.gz homo_sapiens canis_lupus 9606
+taxonomy.sh tree=tree.taxtree.gz gi=gitable.int1.d.gz in=refseq.fasta
 
 Processing parameters:
-tree=           A taxonomic tree made by TaxTree, such as tree.taxtree.gz.
-table=          A table translating gi numbers to NCBI taxIDs.
-                Only needed if gi numbers will be used.
+in=<file>       A file containing named sequences, or just the names.
+out=<file>      Output file.  If blank, use stdout.
+tree=<file>     Specify a TaxTree file like tree.taxtree.gz.  
+                On Genepool, use 'auto'.
+gi=<file>       Specify a gitable file like gitable.int1d.gz. Only needed
+                if gi numbers will be used.  On Genepool, use 'auto'.
+accession=      Specify one or more comma-delimited NCBI accession to taxid
+                files.  Only needed if accesions will be used; requires ~45GB
+                of memory.  On Genepool, use 'auto'.
+level=null      Set to a taxonomic level like phylum to just print that level.
+minlevel=-1     For multi-level printing, do not print levels below this.
+maxlevel=life   For multi-level printing, do not print levels above this.
+silva=f         Parse headers using Silva or semicolon-delimited syntax.
+taxpath=auto    Set the path to taxonomy files; auto only works at NERSC.
+
+Parameters without an '=' symbol will be considered organism identifiers.
+
 * Note *
 Tree and table files are in /global/projectb/sandbox/gaag/bbtools/tax
 For non-Genepool users, or to make new ones, use taxtree.sh and gitable.sh
 
 Java Parameters:
--Xmx            This will be passed to Java to set memory usage, overriding the program's automatic memory detection.
-                -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.  The max is typically 85% of physical memory.
+-Xmx            This will set Java's memory usage, 
+                overriding autodetection.
+                -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify
+                200 megs.  The max is typically 85% of physical memory.
+-eoom           This flag will cause the process to exit if an out-of-memory
+                exception occurs.  Requires Java 8u92+.
+-da             Disable assertions.
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -44,9 +68,8 @@ popd > /dev/null
 #DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/"
 CP="$DIR""current/"
 
-z="-Xmx4g"
-z2="-Xms4g"
-EA="-ea"
+z="-Xmx8g"
+z2="-Xms8g"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -56,6 +79,7 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 	if [[ $set == 1 ]]; then
 		return
@@ -67,12 +91,7 @@ calcXmx () {
 calcXmx "$@"
 
 taxonomy() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-	fi
-	local CMD="java $EA $z -cp $CP tax.PrintTaxonomy $@"
+	local CMD="java $EA $EOOM $z -cp $CP tax.PrintTaxonomy $@"
 	echo $CMD >&2
 	eval $CMD
 }

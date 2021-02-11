@@ -2,12 +2,11 @@ package stream;
 
 import java.util.ArrayList;
 
-import align2.Shared;
-
 import dna.Data;
 import fileIO.ByteFile;
 import fileIO.ByteFile1;
 import fileIO.FileFormat;
+import shared.Shared;
 
 /**
  * @author Brian Bushnell
@@ -36,7 +35,7 @@ public class HeaderInputStream extends ReadInputStream {
 		
 		stdin=ff.stdio();
 		
-		tf=new ByteFile1(ff, false);
+		tf=new ByteFile1(ff);
 	}
 
 	@Override
@@ -96,6 +95,7 @@ public class HeaderInputStream extends ReadInputStream {
 		}
 	}
 	
+	@Override
 	public boolean close(){
 		if(verbose){System.err.println("Closing "+this.getClass().getName()+" for "+tf.name()+"; errorState="+errorState);}
 		errorState|=tf.close();
@@ -122,7 +122,7 @@ public class HeaderInputStream extends ReadInputStream {
 		
 		for(line=tf.nextLine(); line!=null && added<maxReadsToReturn; line=tf.nextLine()){
 			
-			Read r=new Read(null, 0, (byte)0, 0, 0, new String(line), null, numericID);
+			Read r=new Read(null, null, new String(line), numericID);
 
 //			if(interleaved){
 //				if(prev==null){prev=r;}
@@ -152,6 +152,7 @@ public class HeaderInputStream extends ReadInputStream {
 	public boolean paired() {return false;}
 	
 	/** Return true if this stream has detected an error */
+	@Override
 	public boolean errorState(){return errorState;}
 
 	private ArrayList<Read> buffer=null;
@@ -160,7 +161,7 @@ public class HeaderInputStream extends ReadInputStream {
 	private final ByteFile tf;
 //	private final boolean interleaved;
 
-	private final int BUF_LEN=Shared.READ_BUFFER_LENGTH;
+	private final int BUF_LEN=Shared.bufferLen();;
 	
 	public long generated=0;
 	public long consumed=0;

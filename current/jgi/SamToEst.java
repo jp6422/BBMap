@@ -2,23 +2,28 @@ package jgi;
 
 
 import java.io.File;
+import java.io.PrintStream;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Locale;
 
-import stream.Read;
-import stream.SamLine;
-import structures.LongList;
 import dna.Data;
-import dna.Parser;
 import dna.Scaffold;
 import fileIO.ByteFile;
 import fileIO.ReadWrite;
 import fileIO.TextFile;
 import fileIO.TextStreamWriter;
-import align2.ReadStats;
-import align2.Shared;
-import align2.Tools;
+import shared.KillSwitch;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Shared;
+import shared.Tools;
+import stream.Read;
+import stream.SamLine;
+import structures.LongList;
 
 /**
  * 
@@ -36,8 +41,15 @@ public class SamToEst {
 	
 	public static void main(String[] args){
 		
-		ByteFile.FORCE_MODE_BF2=Shared.threads()>2;
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
+		}
 		
+		if(!ByteFile.FORCE_MODE_BF1 && !ByteFile.FORCE_MODE_BF2 && Shared.threads()>2){
+			ByteFile.FORCE_MODE_BF2=true;
+		}
 		
 		ReadWrite.USE_UNPIGZ=true;
 		
@@ -49,11 +61,8 @@ public class SamToEst {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			while(a.startsWith("-")){a=a.substring(1);} //In case people use hyphens
-
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(Parser.parseCommonStatic(arg, a, b)){
+			
+			if(Parser.parseCommonStatic(arg, a, b)){
 				//do nothing
 			}else if(Parser.parseZip(arg, a, b)){
 				//do nothing
@@ -70,15 +79,15 @@ public class SamToEst {
 			}else if(a.equals("fraction")){
 				fractionForAllCaptured=Float.parseFloat(b);
 			}else if(a.equals("append") || a.equals("app")){
-				append=ReadStats.append=Tools.parseBoolean(b);
+				append=ReadStats.append=Parse.parseBoolean(b);
 			}else if(a.equals("overwrite") || a.equals("ow")){
-				overwrite=Tools.parseBoolean(b);
+				overwrite=Parse.parseBoolean(b);
 			}else if(sam==null && i==0 && !arg.contains("=") && (arg.toLowerCase().startsWith("stdin") || new File(arg).exists())){
 				sam=arg;
 			}else if(stats==null && i==1 && !arg.contains("=")){
 				stats=arg;
 			}else{
-				System.err.println("Unknown parameter "+args[i]);
+				outstream.println("Unknown parameter "+args[i]);
 				assert(false) : "Unknown parameter "+args[i];
 				//				throw new RuntimeException("Unknown parameter "+args[i]);
 			}
@@ -91,6 +100,9 @@ public class SamToEst {
 		if(stats==null){stats="stdout";}
 		SamToEst ste=new SamToEst(sam, stats, ref, est, fractionForAllCaptured);
 		ste.process();
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(outstream);
 	}
 	
 	public SamToEst(String in_, String stats_, String ref_, String est_, float fractionForAll_){
@@ -103,7 +115,7 @@ public class SamToEst {
 	
 	public void process(){
 		HashMap<String, EST> table=new HashMap<String, EST>(initialSize);
-		TextFile tf=new TextFile(in, true, false);
+		TextFile tf=new TextFile(in, true);
 		String line=null;
 		
 		String program=null;
@@ -152,8 +164,8 @@ public class SamToEst {
 				
 			}else if(line.charAt(0)=='@'){
 				if(!err){
-					System.err.println("Unexpected header line: "+line);
-					System.err.println("This should not cause problems, and is probably due to concatenated sam files.\n" +
+					outstream.println("Unexpected header line: "+line);
+					outstream.println("This should not cause problems, and is probably due to concatenated sam files.\n" +
 							"Supressing future unexpected header warnings.");
 					err=true;
 				}
@@ -178,7 +190,7 @@ public class SamToEst {
 							int len=0;
 							for(int i=0; i<cigar.length(); i++){
 								char c=cigar.charAt(i);
-								if(Character.isDigit(c)){
+								if(Tools.isDigit(c)){
 									len=(len*10)+(c-'0');
 								}else{
 									if(c=='D' || c=='N'){
@@ -329,25 +341,25 @@ public class SamToEst {
 				}
 			}
 			
-			tsw.println("all:\t"+allBasesMapped+"\t"+String.format("%.4f%%",allBasesPct)+"\t"+allBasesMappedB+"\t"+String.format("%.4f%%",allBasesPctB));
-			tsw.println("most:\t"+mostBasesMapped+"\t"+String.format("%.4f%%",mostBasesPct)+"\t"+mostBasesMappedB+"\t"+String.format("%.4f%%",mostBasesPctB));
-			tsw.println("some:\t"+someBasesMapped+"\t"+String.format("%.4f%%",someBasesPct)+"\t"+someBasesMappedB+"\t"+String.format("%.4f%%",someBasesPctB));
-			tsw.println("zero:\t"+noBasesMapped+"\t"+String.format("%.4f%%",noBasesPct)+"\t"+noBasesMappedB+"\t"+String.format("%.4f%%",noBasesPctB));
-			tsw.println("multi:\t"+multiScaffold+"\t"+String.format("%.4f%%",multiScaffoldPct)+"\t"+multiScaffoldB+"\t"+String.format("%.4f%%",multiScaffoldPctB));
+			tsw.println("all:\t"+allBasesMapped+"\t"+String.format(Locale.ROOT, "%.4f%%",allBasesPct)+"\t"+allBasesMappedB+"\t"+String.format(Locale.ROOT, "%.4f%%",allBasesPctB));
+			tsw.println("most:\t"+mostBasesMapped+"\t"+String.format(Locale.ROOT, "%.4f%%",mostBasesPct)+"\t"+mostBasesMappedB+"\t"+String.format(Locale.ROOT, "%.4f%%",mostBasesPctB));
+			tsw.println("some:\t"+someBasesMapped+"\t"+String.format(Locale.ROOT, "%.4f%%",someBasesPct)+"\t"+someBasesMappedB+"\t"+String.format(Locale.ROOT, "%.4f%%",someBasesPctB));
+			tsw.println("zero:\t"+noBasesMapped+"\t"+String.format(Locale.ROOT, "%.4f%%",noBasesPct)+"\t"+noBasesMappedB+"\t"+String.format(Locale.ROOT, "%.4f%%",noBasesPctB));
+			tsw.println("multi:\t"+multiScaffold+"\t"+String.format(Locale.ROOT, "%.4f%%",multiScaffoldPct)+"\t"+multiScaffoldB+"\t"+String.format(Locale.ROOT, "%.4f%%",multiScaffoldPctB));
 //			tsw.println("numIntrons:\t"+count);
 //			tsw.println("minIntron:\t"+min);
 //			tsw.println("maxIntron:\t"+max);
 //			tsw.println("medIntron:\t"+median);
 //			tsw.println("avgIntron:\t"+(long)(sum/(double)(Tools.max(count,1))));
 			tsw.println("introns\tmin\tmax\tmedian\taverage");
-			tsw.println(count+"\t"+min+"\t"+max+"\t"+median+"\t"+String.format("%.1f", (sum/(double)(Tools.max(count,1)))));
+			tsw.println(count+"\t"+min+"\t"+max+"\t"+median+"\t"+String.format(Locale.ROOT, "%.1f", (sum/(double)(Tools.max(count,1)))));
 
 			tsw.poisonAndWait();
 		}
 	}
 
 	private void addEst(EST est){
-//		Data.sysout.println("\n"+est);
+//		outstream.println("\n"+est);
 		estCount++;
 		partCount+=est.parts;
 		estBases+=est.length;
@@ -364,34 +376,34 @@ public class SamToEst {
 		}
 		
 		if(est.mappedParts==est.parts){
-//			Data.sysout.print("A");
+//			outstream.print("A");
 			allPartsMapped++;
 		}else if(est.mappedParts>=Tools.max(1, est.parts/2)){
-//			Data.sysout.print("B");
+//			outstream.print("B");
 			mostPartsMapped++;
 		}else if(est.mappedParts>0){
-//			Data.sysout.print("C");
+//			outstream.print("C");
 			somePartsMapped++;
 		}else{
-//			Data.sysout.print("D");
+//			outstream.print("D");
 			noPartsMapped++;
 		}
 		
 		int match=est.match();
 		if(match>=(est.length*fractionForAll)){
-//			Data.sysout.print("E");
+//			outstream.print("E");
 			allBasesMapped++;
 			allBasesMappedB+=est.length;
 		}else if(match>=est.length/2){
-//			Data.sysout.print("F");
+//			outstream.print("F");
 			mostBasesMapped++;
 			mostBasesMappedB+=est.length;
 		}else if(match>0){
-//			Data.sysout.print("G");
+//			outstream.print("G");
 			someBasesMapped++;
 			someBasesMappedB+=est.length;
 		}else{
-//			Data.sysout.print("H");
+//			outstream.print("H");
 			noBasesMapped++;
 			noBasesMappedB+=est.length;
 		}
@@ -425,15 +437,17 @@ public class SamToEst {
 	public static boolean append=false;
 //	public HashMap<String, EST> //Only needed if sam file is unordered.
 	
+	static PrintStream outstream=System.err;
+	
 	public static class EST{
 		
 		public EST(String name_){
 			name=name_;
-			System.err.println("New EST: "+name);
+			outstream.println("New EST: "+name);
 		}
 		
 		public void add(SamLine sl){
-			System.err.println("Adding samline "+sl.qname+" to EST "+name);
+			outstream.println("Adding samline "+sl.qname+" to EST "+name);
 			parts++;
 //			length+=sl.seq.length();
 			length+=sl.seq.length;
@@ -462,6 +476,7 @@ public class SamToEst {
 		
 		public int match(){return msdicn[0];}
 		
+		@Override
 		public String toString(){
 			StringBuilder sb=new StringBuilder();
 			sb.append(name).append('\t');
@@ -479,7 +494,7 @@ public class SamToEst {
 		int parts=0, mappedParts=0;
 		HashSet<String> scafnames=new HashSet<String>(4);
 		
-		int[] msdicn=new int[6];
+		int[] msdicn=KillSwitch.allocInt1D(6);
 		
 	}
 	

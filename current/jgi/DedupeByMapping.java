@@ -5,15 +5,17 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.PriorityQueue;
 
-import dna.Timer;
-import align2.Shared;
-import align2.Tools;
+import shared.Parse;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 import stream.ConcurrentReadInputStream;
 import stream.ConcurrentReadOutputStream;
 import stream.Read;
 import stream.ReadStreamWriter;
 import stream.SamLine;
 import structures.ListNum;
+import template.BBTool_ST;
 
 /**
  * @author Brian Bushnell
@@ -43,8 +45,9 @@ public class DedupeByMapping extends BBTool_ST{
 	 * @see jgi.BBTool_ST#setDefaults()
 	 */
 	@Override
-	void setDefaults() {
+	protected void setDefaults() {
 		keepUnmapped=true;
+		keepSingletons=true;
 		sorted=false;
 		usePairOrder=true;
 	}
@@ -52,26 +55,32 @@ public class DedupeByMapping extends BBTool_ST{
 	@Override
 	public boolean parseArgument(String arg, String a, String b) {
 		if(a.equals("keepunmapped") | a.equals("ku")){
-			keepUnmapped=Tools.parseBoolean(b);
+			keepUnmapped=Parse.parseBoolean(b);
+			return true;
+		}else if(a.equals("keepsingletons") | a.equals("ks")){
+			keepSingletons=Parse.parseBoolean(b);
 			return true;
 		}else if(a.equals("ignorepairorder") | a.equals("ipo")){
-			usePairOrder=!Tools.parseBoolean(b);
+			usePairOrder=!Parse.parseBoolean(b);
 			return true;
 		}else if(a.equals("sorted")){
-			sorted=Tools.parseBoolean(b);
+			sorted=Parse.parseBoolean(b);
 			return true;
 		}
 		return false;
 	}
 	
 	@Override
-	boolean processReadPair(Read r1, Read r2) {
+	protected final boolean useSharedHeader(){return true;}
+	
+	@Override
+	protected boolean processReadPair(Read r1, Read r2) {
 		assert(r2==null);
 		return (sorted ? processReadPair_sorted(r1) : processReadPair_unsorted(r1));
 	}
 	
 	boolean processReadPair_unsorted(Read r1) {
-		SamLine sl=(SamLine) r1.obj;
+		SamLine sl=r1.samline;
 		if(!sl.primary()){return false;}
 		if(sl.mapped()){
 			String rname=new String(sl.rname());
@@ -93,10 +102,10 @@ public class DedupeByMapping extends BBTool_ST{
 		if(old==null){
 			nameToRead.put(r1.id, r1);
 		}else{
-			assert(old.mate==null);
+			//assert(old.mate==null);//This triggers...  maybe, after filtering and leaving some unpaired reads
 			old.mate=r1;
 			r1.mate=old;
-			SamLine sl2=(SamLine) old.obj;
+			SamLine sl2=old.samline;
 			if(sl2.pairnum()==1){
 				nameToRead.put(r1.id, r1);
 			}
@@ -107,7 +116,7 @@ public class DedupeByMapping extends BBTool_ST{
 	
 	boolean processReadPair_sorted(Read r1) {
 		assert(false) : "TODO";
-		SamLine sl=(SamLine) r1.obj;
+		SamLine sl=r1.samline;
 		if(!sl.primary()){return false;}
 		if(sl.mapped()){
 			String rname=new String(sl.rname());
@@ -132,7 +141,7 @@ public class DedupeByMapping extends BBTool_ST{
 			assert(old.mate==null);
 			old.mate=r1;
 			r1.mate=old;
-			SamLine sl2=(SamLine) old.obj;
+			SamLine sl2=old.samline;
 			if(sl2.pairnum()==1){
 				nameToRead.put(r1.id, r1);
 			}
@@ -141,7 +150,7 @@ public class DedupeByMapping extends BBTool_ST{
 	}
 	
 	@Override
-	void processInner(final ConcurrentReadInputStream cris, final ConcurrentReadOutputStream ros){
+	protected void processInner(final ConcurrentReadInputStream cris, final ConcurrentReadOutputStream ros){
 		if(sorted){processInner_sorted(cris, ros);}
 		else{processInner_unsorted(cris, ros);}
 	}
@@ -162,13 +171,13 @@ public class DedupeByMapping extends BBTool_ST{
 				assert((ffin1==null || ffin1.samOrBam()) || (r.mate!=null)==cris.paired());
 			}
 
-			while(reads!=null && reads.size()>0){
+			while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
 				if(verbose){outstream.println("Fetched "+reads.size()+" reads.");}
 				
 				for(int idx=0; idx<reads.size(); idx++){
 					final Read r1=reads.get(idx);
 					assert(r1.mate==null);
-					assert(r1.obj!=null);
+					assert(r1.samline!=null);
 					
 					final int initialLength1=r1.length();
 					
@@ -180,7 +189,7 @@ public class DedupeByMapping extends BBTool_ST{
 					processReadPair(r1, null);
 				}
 
-				cris.returnList(ln.id, ln.list.isEmpty());
+				cris.returnList(ln);
 				if(verbose){outstream.println("Returned a list.");}
 				ln=cris.nextList();
 				reads=(ln!=null ? ln.list : null);
@@ -202,24 +211,33 @@ public class DedupeByMapping extends BBTool_ST{
 				
 				Read r2=r1.mate;
 				if(!r1.mapped() && !r1.mateMapped()){
-					unmappedReads+=1+r1.mateCount();
-					unmappedBases+=r1.length()+r1.mateLength();
-					if(keepUnmapped){unmapped.add(r1);}
+					unmappedReads+=r1.pairCount();
+					unmappedBases+=r1.pairLength();
+					if(keepUnmapped){
+						retainedReads+=r1.pairCount();
+						retainedBases+=r1.pairLength();
+						unmapped.add(r1);
+					}
+				}else if(keepSingletons && r2!=null && (r1.mapped()!=r1.mateMapped())){
+					retainedReads+=r1.pairCount();
+					retainedBases+=r1.pairLength();
+					unmapped.add(r1);
 				}else{
-					Quad q=new Quad((r1.strand()==0 ? r1.start : r1.stop), r1.chrom, r2==null ? -2 : (r2.strand()==0 ? r2.start : r2.stop), r2==null ? -2 : r2.chrom);
+//					System.err.println(r1.strandChar()+", "+r1.start+", "+r1.stop+", "+r2.strandChar()+", "+r2.start+", "+r2.stop);
+					Quad q=toQuad(r1, r2);
 					Read old1=quadToRead.get(q);
 					if(old1==null){quadToRead.put(q, r1);}
 					else{
 						Read old2=old1.mate;
-						float a=(r1.expectedErrors(true, 0)+(r2==null ? 0 : r2.expectedErrors(true, 0)))/(r1.length()+r1.mateLength());
+						float a=(r1.expectedErrors(true, 0)+(r2==null ? 0 : r2.expectedErrors(true, 0)))/r1.pairLength();
 						float b=old1.expectedErrors(true, 0)+(old2==null ? 0 : old2.expectedErrors(true, 0))/(old1.length()+old1.mateLength());
 						if(a<b){
-							quadToRead.put(q, r1);	
+							quadToRead.put(q, r1);
 							duplicateReads+=1+old1.mateCount();
 							duplicateBases+=old1.length()+old1.mateLength();
 						}else{
-							duplicateReads+=1+r1.mateCount();
-							duplicateBases+=r1.length()+r1.mateLength();
+							duplicateReads+=r1.pairCount();
+							duplicateBases+=r1.pairLength();
 						}
 					}
 				}
@@ -229,18 +247,20 @@ public class DedupeByMapping extends BBTool_ST{
 		}
 		
 		{
-			ArrayList<Read> list=new ArrayList<Read>(Shared.READ_BUFFER_LENGTH);
+			ArrayList<Read> list=new ArrayList<Read>(Shared.bufferLen());
 			int num=0;
 			for(Quad q : quadToRead.keySet()){
 				Read r=quadToRead.get(q);
 				if(keepUnmapped || r.mapped() || (r.mate!=null && r.mate.mapped())){
+					retainedReads+=1+r.mateCount();
+					retainedBases+=r.length()+r.mateLength();
 					list.add(r);
-					if(list.size()>=Shared.READ_BUFFER_LENGTH){
+					if(list.size()>=Shared.bufferLen()){
 						if(ros!=null){
 							ros.add(list, num);
 							num++;
 						}
-						list=new ArrayList<Read>(Shared.READ_BUFFER_LENGTH);
+						list=new ArrayList<Read>(Shared.bufferLen());
 					}
 				}
 			}
@@ -256,8 +276,9 @@ public class DedupeByMapping extends BBTool_ST{
 				num++;
 			}
 		}
-		outstream.println("Duplicate reads:    "+duplicateReads+" \t("+duplicateBases+" bases)");
-		outstream.println("Unmapped reads:     "+unmappedReads+" \t("+unmappedBases+" bases)");
+		outstream.println("Duplicate reads:     "+duplicateReads+" \t("+duplicateBases+" bases)");
+		outstream.println("Unconsidered reads:  "+unmappedReads+" \t("+unmappedBases+" bases)");
+		outstream.println("Retained reads:      "+retainedReads+" \t("+retainedBases+" bases)");
 	}
 	
 	
@@ -277,13 +298,13 @@ public class DedupeByMapping extends BBTool_ST{
 				assert((ffin1==null || ffin1.samOrBam()) || (r.mate!=null)==cris.paired());
 			}
 
-			while(reads!=null && reads.size()>0){
+			while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
 				if(verbose){outstream.println("Fetched "+reads.size()+" reads.");}
 				
 				for(int idx=0; idx<reads.size(); idx++){
 					final Read r1=reads.get(idx);
 					assert(r1.mate==null);
-					assert(r1.obj!=null);
+					assert(r1.samline!=null);
 					
 					final int initialLength1=r1.length();
 					
@@ -295,7 +316,7 @@ public class DedupeByMapping extends BBTool_ST{
 					processReadPair(r1, null);
 				}
 
-				cris.returnList(ln.id, ln.list.isEmpty());
+				cris.returnList(ln);
 				if(verbose){outstream.println("Returned a list.");}
 				ln=cris.nextList();
 				reads=(ln!=null ? ln.list : null);
@@ -317,24 +338,24 @@ public class DedupeByMapping extends BBTool_ST{
 				
 				Read r2=r1.mate;
 				if(!r1.mapped() && !r1.mateMapped()){
-					unmappedReads+=1+r1.mateCount();
-					unmappedBases+=r1.length()+r1.mateLength();
+					unmappedReads+=r1.pairCount();
+					unmappedBases+=r1.pairLength();
 					if(keepUnmapped){unmapped.add(r1);}
 				}else{
-					Quad q=new Quad((r1.strand()==0 ? r1.start : r1.stop), r1.chrom, r2==null ? -2 : (r2.strand()==0 ? r2.start : r2.stop), r2==null ? -2 : r2.chrom);
+					Quad q=toQuad(r1, r2);
 					Read old1=quadToRead.get(q);
 					if(old1==null){quadToRead.put(q, r1);}
 					else{
 						Read old2=old1.mate;
-						float a=(r1.expectedErrors(true, 0)+(r2==null ? 0 : r2.expectedErrors(true, 0)))/(r1.length()+r1.mateLength());
+						float a=(r1.expectedErrors(true, 0)+(r2==null ? 0 : r2.expectedErrors(true, 0)))/r1.pairLength();
 						float b=old1.expectedErrors(true, 0)+(old2==null ? 0 : old2.expectedErrors(true, 0))/(old1.length()+old1.mateLength());
 						if(a<b){
-							quadToRead.put(q, r1);	
+							quadToRead.put(q, r1);
 							duplicateReads+=1+old1.mateCount();
 							duplicateBases+=old1.length()+old1.mateLength();
 						}else{
-							duplicateReads+=1+r1.mateCount();
-							duplicateBases+=r1.length()+r1.mateLength();
+							duplicateReads+=r1.pairCount();
+							duplicateBases+=r1.pairLength();
 						}
 					}
 				}
@@ -344,18 +365,18 @@ public class DedupeByMapping extends BBTool_ST{
 		}
 		
 		{
-			ArrayList<Read> list=new ArrayList<Read>(Shared.READ_BUFFER_LENGTH);
+			ArrayList<Read> list=new ArrayList<Read>(Shared.bufferLen());
 			int num=0;
 			for(Quad q : quadToRead.keySet()){
 				Read r=quadToRead.get(q);
 				if(keepUnmapped || r.mapped() || (r.mate!=null && r.mate.mapped())){
 					list.add(r);
-					if(list.size()>=Shared.READ_BUFFER_LENGTH){
+					if(list.size()>=Shared.bufferLen()){
 						if(ros!=null){
 							ros.add(list, num);
 							num++;
 						}
-						list=new ArrayList<Read>(Shared.READ_BUFFER_LENGTH);
+						list=new ArrayList<Read>(Shared.bufferLen());
 					}
 				}
 			}
@@ -376,28 +397,63 @@ public class DedupeByMapping extends BBTool_ST{
 	}
 	
 	@Override
-	void startupSubclass() {}
+	protected void startupSubclass() {}
 	
 	@Override
-	void shutdownSubclass() {}
+	protected void shutdownSubclass() {}
 	
 	@Override
-	void showStatsSubclass(Timer t, long readsIn, long basesIn) {}
+	protected void showStatsSubclass(Timer t, long readsIn, long basesIn) {}
+	
+	private Quad toQuad(Read r1, Read r2){
+
+//		if(usePairOrder){
+//			start1=start1_;
+//			start2=start2_;
+//			chr1=chr1_;
+//			chr2=chr2_;
+//		}else{
+//			start1=Tools.max(start1_,start2_);
+//			start2=Tools.min(start1_,start2_);
+//			chr1=Tools.max(chr1_,chr2_);
+//			chr2=Tools.min(chr1_,chr2_);
+//		}
+//
+//		int pos1, pos2, chrom1, chrom2;
+//
+//		if()
+
+		final int s1=r1.strand(), a1=r1.start, b1=r1.stop, c1=r1.chrom;
+		final int s2=(r2==null ? 0 : r2.strand()), a2=(r2==null ? 0 : r2.start), b2=(r2==null ? 0 : r2.stop), c2=(r2==null ? 0 : r2.chrom);
+		final Quad q;
+		if(usePairOrder){
+			q=new Quad(s1==0 ? a1 : b1, c1, s2==0 ? a2 : b2, c2);
+		}else{
+			if(s1==0){
+				q=new Quad(s1==0 ? a1 : b1, c1, s2==0 ? a2 : b2, c2);
+			}else{
+				q=new Quad(s2==0 ? a2 : b2, c2, s1==0 ? a1 : b1, c1);
+			}
+		}
+		
+		//q=new Quad((r1.strand()==0 ? r1.start : r1.stop), r1.chrom, r2==null ? -2 : (r2.strand()==0 ? r2.start : r2.stop), r2==null ? -2 : r2.chrom);
+		return q;
+	}
 	
 	private static class Quad implements Comparable<Quad>{
 		
 		Quad(int start1_, int start2_, int chr1_, int chr2_){
-			if(usePairOrder){
-				start1=start1_;
-				start2=start2_;
-				chr1=chr1_;
-				chr2=chr2_;
-			}else{
-				start1=Tools.max(start1_,start2_);
-				start2=Tools.min(start1_,start2_);
-				chr1=Tools.max(chr1_,chr2_);
-				chr2=Tools.min(chr1_,chr2_);
-			}
+			start1=start1_;
+			start2=start2_;
+			chr1=chr1_;
+			chr2=chr2_;
+			
+//			System.err.println(usePairOrder+", "+this);
+		}
+		
+		@Override
+		public String toString(){
+			return "("+start1+","+start2+","+chr1+","+chr2+")";
 		}
 		
 		@Override
@@ -431,6 +487,7 @@ public class DedupeByMapping extends BBTool_ST{
 	}
 	
 	private boolean keepUnmapped;
+	private boolean keepSingletons;
 	private boolean sorted;
 	private static boolean usePairOrder;
 
@@ -438,8 +495,10 @@ public class DedupeByMapping extends BBTool_ST{
 	private long duplicateBases=0;
 	private long unmappedReads=0;
 	private long unmappedBases=0;
+	private long retainedReads=0;
+	private long retainedBases=0;
 	
-	private int initialSize=(int)Tools.min(2000000, Tools.max(80000, Shared.getAvailableMemory()/4000));
+	private int initialSize=(int)Tools.min(2000000, Tools.max(80000, Shared.memAvailable(1)/4000));
 	
 	private HashMap<String, Integer> contigToNumber=new HashMap<String, Integer>(initialSize);
 	private LinkedHashMap<Quad, Read> quadToRead=new LinkedHashMap<Quad, Read>(initialSize);

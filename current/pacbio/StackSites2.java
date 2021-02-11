@@ -2,29 +2,28 @@ package pacbio;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 
+import align2.MultiStateAligner9PacBio;
+import dna.AminoAcid;
+import dna.ChromosomeArray;
+import dna.Data;
+import fileIO.ReadWrite;
+import fileIO.TextFile;
+import fileIO.TextStreamWriter;
+import shared.Parse;
+import shared.PreParser;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 import stream.ConcurrentLegacyReadInputStream;
 import stream.RTextInputStream;
 import stream.Read;
 import stream.SiteScore;
 import stream.SiteScoreR;
+import structures.CoverageArray;
+import structures.CoverageArray2;
 import structures.ListNum;
-import dna.AminoAcid;
-import dna.ChromosomeArray;
-import dna.CoverageArray;
-import dna.CoverageArray2;
-import dna.Data;
-import dna.Gene;
-import dna.Parser;
-import dna.Timer;
-import fileIO.ReadWrite;
-import fileIO.TextFile;
-import fileIO.TextStreamWriter;
-import align2.MultiStateAligner9PacBio;
-import align2.Tools;
 
 /**
  * @author Brian Bushnell
@@ -34,7 +33,11 @@ import align2.Tools;
 public class StackSites2 {
 	
 	public static void main(String[] args){
-		System.err.println("Executing "+(new Object() { }.getClass().getEnclosingClass().getName())+" "+Arrays.toString(args)+"\n");
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
 
 		Timer t=new Timer();
 		
@@ -47,14 +50,12 @@ public class StackSites2 {
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
 			
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(a.equals("genome") || a.equals("build")){
+			if(a.equals("genome") || a.equals("build")){
 				Data.setGenome(Integer.parseInt(b));
 			}else if(a.equals("tempname")){
 				tempname=b;
 			}else if(a.equals("deletefiles") || a.startsWith("deletetemp") || a.equals("delete")){
-				DELETE_TEMP=(Tools.parseBoolean(b));
+				DELETE_TEMP=(Parse.parseBoolean(b));
 			}else if(a.equals("blocksize")){
 				BLOCKSIZE=(Integer.parseInt(b));
 			}else{
@@ -121,7 +122,7 @@ public class StackSites2 {
 				assert(paired==(r.mate!=null));
 			}
 			
-			while(reads!=null && reads.size()>0){
+			while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
 				//System.err.println("reads.size()="+reads.size());
 				for(Read r : reads){
 					readsProcessed++;
@@ -143,7 +144,7 @@ public class StackSites2 {
 									}else{//Check for no-refs
 										int len=ss.stop-ss.start+1;
 										if(len==r.length() && ss.slowScore>=0.5f*MultiStateAligner9PacBio.POINTS_MATCH2){
-											b=checkPerfection(ss.start, ss.stop, r.bases, Data.getChromosome(ss.chrom), ss.strand==Gene.MINUS, 0.5f);
+											b=checkPerfection(ss.start, ss.stop, r.bases, Data.getChromosome(ss.chrom), ss.strand==Shared.MINUS, 0.5f);
 										}
 									}
 									if(b){
@@ -200,7 +201,7 @@ public class StackSites2 {
 									}else{//Check for no-refs
 										int len=ss.stop-ss.start+1;
 										if(len==r2.length() && ss.slowScore>=0.5f*MultiStateAligner9PacBio.POINTS_MATCH2){
-											b=checkPerfection(ss.start, ss.stop, r2.bases, Data.getChromosome(ss.chrom), ss.strand==Gene.MINUS, 0.5f);
+											b=checkPerfection(ss.start, ss.stop, r2.bases, Data.getChromosome(ss.chrom), ss.strand==Shared.MINUS, 0.5f);
 										}
 									}
 									if(b){
@@ -247,13 +248,13 @@ public class StackSites2 {
 					
 				}
 				//System.err.println("returning list");
-				cris.returnList(ln.id, ln.list.isEmpty());
+				cris.returnList(ln);
 				//System.err.println("fetching list");
 				ln=cris.nextList();
 				reads=(ln!=null ? ln.list : null);
 			}
 			System.out.println("Finished reading");
-			cris.returnList(ln.id, ln.list.isEmpty());
+			cris.returnList(ln);
 			System.out.println("Returned list");
 			ReadWrite.closeStream(cris);
 			System.out.println("Closed stream");
@@ -284,7 +285,7 @@ public class StackSites2 {
 		out.start();
 		ArrayList<Long> keys=new ArrayList<Long>(g.wmap.size());
 		keys.addAll(g.wmap.keySet());
-		Collections.sort(keys);
+		Shared.sort(keys);
 		for(Long k : keys){
 			TextStreamWriter tsw=g.wmap.get(k);
 			tsw.poison();
@@ -316,7 +317,7 @@ public class StackSites2 {
 				assert(false);
 			}
 			
-			TextFile tf=new TextFile(fname, false, false);
+			TextFile tf=new TextFile(fname, false);
 			ArrayList<SiteScoreR> list=new ArrayList<SiteScoreR>(1000);
 			for(String s=tf.nextLine(); s!=null; s=tf.nextLine()){
 				SiteScoreR ssr=SiteScoreR.fromText(s);
@@ -333,7 +334,7 @@ public class StackSites2 {
 			if(DELETE_TEMP){
 				new File(fname).delete();
 			}
-			Collections.sort(list, SiteScoreR.PCOMP);
+			Shared.sort(list, SiteScoreR.PCOMP);
 			
 			final int lim=list.size();
 			for(int i=0; i<lim; i++){
@@ -474,7 +475,7 @@ public class StackSites2 {
 	}
 	
 	/** Sites will be written to files, each containing an index range of this size.
-	 * Larger means fewer files, but more memory used when reading the files (at a later stage). 
+	 * Larger means fewer files, but more memory used when reading the files (at a later stage).
 	 */
 	public static int BLOCKSIZE=8000000;
 	

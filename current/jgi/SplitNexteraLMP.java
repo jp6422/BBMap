@@ -1,20 +1,23 @@
 package jgi;
 
 import java.util.ArrayList;
+import java.util.Locale;
 
-import kmer.AbstractKmerTable;
-import kmer.TableLoaderLockFree;
-import kmer.TableReader;
-import align2.Tools;
-import dna.Timer;
 import fileIO.ByteStreamWriter;
 import fileIO.FileFormat;
 import fileIO.ReadWrite;
 import fileIO.TextStreamWriter;
+import kmer.AbstractKmerTable;
+import kmer.TableLoaderLockFree;
+import kmer.TableReader;
+import shared.Parse;
+import shared.Timer;
+import shared.Tools;
 import stream.ConcurrentReadInputStream;
 import stream.ConcurrentReadOutputStream;
 import stream.Read;
 import structures.ListNum;
+import template.BBTool_ST;
 
 /**
  * @author Brian Bushnell
@@ -29,7 +32,8 @@ public class SplitNexteraLMP extends BBTool_ST {
 		bbt.process(t);
 	}
 	
-	void setDefaults(){
+	@Override
+	protected void setDefaults(){
 		outStats="stderr";
 		minReadLength=40;
 		mask=false;
@@ -48,7 +52,7 @@ public class SplitNexteraLMP extends BBTool_ST {
 		super(args);
 		reparse(args);
 		
-		tables=(mask ? TableLoaderLockFree.makeTables(AbstractKmerTable.ARRAY1D, 400, true) : null);
+		tables=(mask ? TableLoaderLockFree.makeTables(AbstractKmerTable.ARRAY1D, 12, -1L, false, 0.9) : null);
 		
 		if(outFrag1!=null && outFrag2==null && outFrag1.indexOf('#')>-1){
 			outFrag2=outFrag1.replace("#", "2");
@@ -64,9 +68,9 @@ public class SplitNexteraLMP extends BBTool_ST {
 			System.err.println("Testing merge rate.");
 			float rate=FileFormat.testInput(in1, FileFormat.FASTQ, null, true, true).stdio() ? 1 : BBMerge.mergeableFraction(in1, in2, 1000000, 0.2f);
 			merge=rate>0.1;
-			System.err.println("Merge rate: "+String.format("%.2f%%", rate));
+			System.err.println("Merge rate: "+String.format(Locale.ROOT, "%.2f%%", rate));
 			if(!merge){
-				System.err.println("Merging was disabled due to a low merge rate of "+String.format("%.3f", rate));
+				System.err.println("Merging was disabled due to a low merge rate of "+String.format(Locale.ROOT, "%.3f", rate));
 			}
 		}
 	}
@@ -96,29 +100,29 @@ public class SplitNexteraLMP extends BBTool_ST {
 			minReadLength=Integer.parseInt(b);
 			return true;
 		}else if(a.equals("useinnerlmp") || a.equals("innerlmp")){
-			useInnerLMP=Tools.parseBoolean(b);
+			useInnerLMP=Parse.parseBoolean(b);
 			return true;
 		}else if(a.equals("rename")){
-			RENAME=Tools.parseBoolean(b);
+			RENAME=Parse.parseBoolean(b);
 			return true;
 		}else if(a.equals("literal")){
 			literals=(b==null ? null : b.split(","));
 			return true;
 		}else if(a.equals("mask")){
-			mask=Tools.parseBoolean(b);
+			mask=Parse.parseBoolean(b);
 			return true;
 		}else if(a.equals("merge")){
-			merge=Tools.parseBoolean(b);
+			merge=Parse.parseBoolean(b);
 			return true;
 		}else if(a.equals("testmerge")){
 			testmerge=Double.parseDouble(b);
 			if(testmerge>1){testmerge/=100;}
 			return true;
 		}else if(a.equals("rcomp")){
-			rcomp=Tools.parseBoolean(b);
+			rcomp=Parse.parseBoolean(b);
 			return true;
 		}else if(a.equals("maskmiddle") || a.equals("mm")){
-			maskMiddle=Tools.parseBoolean(b);
+			maskMiddle=Parse.parseBoolean(b);
 			return true;
 		}else if(a.equals("k")){
 			k=Integer.parseInt(b);
@@ -147,7 +151,7 @@ public class SplitNexteraLMP extends BBTool_ST {
 	}
 	
 	@Override
-	void startupSubclass(){
+	protected void startupSubclass(){
 		
 		if(!Tools.testOutputFiles(overwrite, append, false, out1, out2, outFrag1, outFrag2, outUnk1, outUnk2)){
 			throw new RuntimeException("\noverwrite="+overwrite+", append="+append+"\n" +
@@ -193,7 +197,7 @@ public class SplitNexteraLMP extends BBTool_ST {
 	@Override
 	/** Iterate through the reads.
 	 * This may optionally be overridden. */
-	void processInner(final ConcurrentReadInputStream cris, final ConcurrentReadOutputStream rosLmp){
+	protected void processInner(final ConcurrentReadInputStream cris, final ConcurrentReadOutputStream rosLmp){
 		
 		if(mask){
 			final TableLoaderLockFree loader=new TableLoaderLockFree(tables, k, mink, 0, hdist, edist, rcomp, maskMiddle);
@@ -206,7 +210,7 @@ public class SplitNexteraLMP extends BBTool_ST {
 				ByteStreamWriter bsw=new ByteStreamWriter(dump, overwrite, false, true);
 				bsw.start();
 				for(AbstractKmerTable set : tables){
-					set.dumpKmersAsBytes(bsw, k, 0);
+					set.dumpKmersAsBytes(bsw, k, 0, Integer.MAX_VALUE, null);
 				}
 				bsw.poisonAndWait();
 			}
@@ -221,7 +225,7 @@ public class SplitNexteraLMP extends BBTool_ST {
 		}
 		
 		readsProcessed=0;
-		basesProcessed=0;	
+		basesProcessed=0;
 		
 		readsLmp=0;
 		basesLmp=0;
@@ -257,7 +261,7 @@ public class SplitNexteraLMP extends BBTool_ST {
 					final int initialLength1=r1.length();
 					final int initialLength2=(r1.mateLength());
 					
-					readsProcessed+=1+r1.mateCount();
+					readsProcessed+=r1.pairCount();
 					basesProcessed+=initialLength1+initialLength2;
 					
 					boolean keep=processReadPair(r1, r2, outLmp, outFrag, outUnk, outSingle);
@@ -265,8 +269,8 @@ public class SplitNexteraLMP extends BBTool_ST {
 				}
 
 				for(Read r1 : outLmp){
-					readsLmp+=1+r1.mateCount();
-					basesLmp+=r1.length()+r1.mateLength();
+					readsLmp+=r1.pairCount();
+					basesLmp+=r1.pairLength();
 					assert(r1.mate!=null);
 					assert(r1.pairnum()==0);
 					assert(r1.mate.pairnum()==1) : r1.mate.id+"\n\n"+r1.length()+"\n"+r1+"\n\n"+r1.mateLength()+"\n"+r1.mate+"\n\n";
@@ -275,8 +279,8 @@ public class SplitNexteraLMP extends BBTool_ST {
 				if(rosLmp!=null){rosLmp.add(outLmp, ln.id);}
 
 				for(Read r1 : outFrag){
-					readsFrag+=1+r1.mateCount();
-					basesFrag+=r1.length()+r1.mateLength();
+					readsFrag+=r1.pairCount();
+					basesFrag+=r1.pairLength();
 					assert(r1.mate!=null);
 					assert(r1.pairnum()==0);
 					assert(r1.mate.pairnum()==1);
@@ -285,8 +289,8 @@ public class SplitNexteraLMP extends BBTool_ST {
 				if(rosFrag!=null){rosFrag.add(outFrag, ln.id);}
 
 				for(Read r1 : outUnk){
-					readsUnk+=1+r1.mateCount();
-					basesUnk+=r1.length()+r1.mateLength();
+					readsUnk+=r1.pairCount();
+					basesUnk+=r1.pairLength();
 					assert(r1.mate!=null);
 					assert(r1.pairnum()==0);
 					assert(r1.mate.pairnum()==1);
@@ -295,14 +299,14 @@ public class SplitNexteraLMP extends BBTool_ST {
 				if(rosUnk!=null){rosUnk.add(outUnk, ln.id);}
 
 				for(Read r1 : outSingle){
-					readsSingle+=1+r1.mateCount();
-					basesSingle+=r1.length()+r1.mateLength();
+					readsSingle+=r1.pairCount();
+					basesSingle+=r1.pairLength();
 					assert(r1.pairnum()==0);
 					assert(r1.mate==null);
 				}
 				if(rosSingle!=null){rosSingle.add(outSingle, ln.id);}
 
-				cris.returnList(ln.id, ln.list.isEmpty());
+				cris.returnList(ln);
 				if(verbose){outstream.println("Returned a list.");}
 				ln=cris.nextList();
 				listIn=(ln!=null ? ln.list : null);
@@ -314,7 +318,7 @@ public class SplitNexteraLMP extends BBTool_ST {
 	}
 	
 	@Override
-	void showStatsSubclass(final Timer t, long readsIn, long basesIn){
+	protected void showStatsSubclass(final Timer t, long readsIn, long basesIn){
 		
 		TextStreamWriter tsw=new TextStreamWriter(outStats==null ? "stderr" : outStats, overwrite, append, false);
 		tsw.start();
@@ -325,30 +329,30 @@ public class SplitNexteraLMP extends BBTool_ST {
 		final double bmult=100.0/basesIn;
 		
 		//Note that this can go over 100%
-		tsw.println("Long Mate Pairs:        \t"+readsLmp+" reads ("+String.format("%.2f",readsLmp*rmult)+"%) \t"+
-				basesLmp+" bases ("+String.format("%.2f",basesLmp*bmult)+"%)");
-		tsw.println("Fragment Pairs:         \t"+readsFrag+" reads ("+String.format("%.2f",readsFrag*rmult)+"%) \t"+
-				basesFrag+" bases ("+String.format("%.2f",basesFrag*bmult)+"%)");
-		tsw.println("Unknown Pairs:          \t"+readsUnk+" reads ("+String.format("%.2f",readsUnk*rmult)+"%) \t"+
-				basesUnk+" bases ("+String.format("%.2f",basesUnk*bmult)+"%)");
-		tsw.println("Singletons:             \t"+readsSingle+" reads ("+String.format("%.2f",readsSingle*100.0/readsIn)+"%) \t"+
-				basesSingle+" bases ("+String.format("%.2f",basesSingle*bmult)+"%)");
+		tsw.println("Long Mate Pairs:        \t"+readsLmp+" reads ("+String.format(Locale.ROOT, "%.2f",readsLmp*rmult)+"%) \t"+
+				basesLmp+" bases ("+String.format(Locale.ROOT, "%.2f",basesLmp*bmult)+"%)");
+		tsw.println("Fragment Pairs:         \t"+readsFrag+" reads ("+String.format(Locale.ROOT, "%.2f",readsFrag*rmult)+"%) \t"+
+				basesFrag+" bases ("+String.format(Locale.ROOT, "%.2f",basesFrag*bmult)+"%)");
+		tsw.println("Unknown Pairs:          \t"+readsUnk+" reads ("+String.format(Locale.ROOT, "%.2f",readsUnk*rmult)+"%) \t"+
+				basesUnk+" bases ("+String.format(Locale.ROOT, "%.2f",basesUnk*bmult)+"%)");
+		tsw.println("Singletons:             \t"+readsSingle+" reads ("+String.format(Locale.ROOT, "%.2f",readsSingle*100.0/readsIn)+"%) \t"+
+				basesSingle+" bases ("+String.format(Locale.ROOT, "%.2f",basesSingle*bmult)+"%)");
 		tsw.println("\n(Note: Read totals may exceed 100%, though base totals should not.)");
 		tsw.println("");
-		tsw.println("Adapters Detected:      \t"+junctionsDetected+" ("+String.format("%.2f%%)",junctionsDetected*100.0/junctionsSought));
+		tsw.println("Adapters Detected:      \t"+junctionsDetected+" ("+String.format(Locale.ROOT, "%.2f%%)",junctionsDetected*100.0/junctionsSought));
 		tsw.println("Bases Recovered:        \t"+(basesLmp+basesFrag+basesUnk+basesSingle)+
-				" ("+String.format("%.2f%%)",(basesLmp+basesFrag+basesUnk+basesSingle)*bmult));
+				" ("+String.format(Locale.ROOT, "%.2f%%)",(basesLmp+basesFrag+basesUnk+basesSingle)*bmult));
 		if(merge){
 			tsw.println("");
-			tsw.println("Merged Pairs:           \t"+mergedReadCount+" ("+String.format("%.2f%%)",mergedReadCount*200.0/readsProcessed));
-			tsw.println("Merged Bases:           \t"+mergedBaseCount+" ("+String.format("%.2f%%)",mergedBaseCount*100.0/basesProcessed));
+			tsw.println("Merged Pairs:           \t"+mergedReadCount+" ("+String.format(Locale.ROOT, "%.2f%%)",mergedReadCount*200.0/readsProcessed));
+			tsw.println("Merged Bases:           \t"+mergedBaseCount+" ("+String.format(Locale.ROOT, "%.2f%%)",mergedBaseCount*100.0/basesProcessed));
 		}
 		
 		errorState|=tsw.poisonAndWait();
 	}
 	
 	@Override
-	boolean processReadPair(Read r1, Read r2) {
+	protected boolean processReadPair(Read r1, Read r2) {
 		throw new RuntimeException("Do not use.");
 	}
 	
@@ -589,15 +593,17 @@ public class SplitNexteraLMP extends BBTool_ST {
 	}
 	
 	@Override
-	void shutdownSubclass(){
+	protected void shutdownSubclass(){
 		errorState|=ReadWrite.closeStreams(null, rosFrag, rosUnk, rosSingle);
 	}
+	
+	@Override
+	protected final boolean useSharedHeader(){return true;}
 	
 	/*--------------------------------------------------------------*/
 	/*----------------        Masking Fields        ----------------*/
 	/*--------------------------------------------------------------*/
 	
-	private String[] refs=null;
 	private String[] literals=new String[] {"CTGTCTCTTATACACATCTAGATGTGTATAAGAGACAG"};
 	
 	private final AbstractKmerTable[] tables;

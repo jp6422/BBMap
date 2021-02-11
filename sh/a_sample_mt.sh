@@ -1,17 +1,16 @@
 #!/bin/bash
-#a_sample_mt in=<infile> out=<outfile>
 
 usage(){
 echo "
 Written by Brian Bushnell
-Last modified November 19, 2015
+Last modified July 31, 2019
 
 Description:  Does nothing.  Should be fast.
+This is a template for making wrappers for new tools.
 
 Usage:  a_sample_mt.sh in=<input file> out=<output file>
 
 Input may be fasta or fastq, compressed or uncompressed.
-
 
 Standard parameters:
 in=<file>       Primary input, or read 1 input.
@@ -28,13 +27,18 @@ Processing parameters:
 None yet!
 
 Java Parameters:
--Xmx            This will be passed to Java to set memory usage, overriding the program's automatic memory detection.
-                -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.  The max is typically 85% of physical memory.
+-Xmx            This will set Java's memory usage, overriding autodetection.
+                -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will
+                specify 200 megs. The max is typically 85% of physical memory.
+-eoom           This flag will cause the process to exit if an out-of-memory
+                exception occurs.  Requires Java 8u92+.
+-da             Disable assertions.
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -50,7 +54,6 @@ CP="$DIR""current/"
 
 z="-Xmx4g"
 z2="-Xms4g"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -60,6 +63,7 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 	if [[ $set == 1 ]]; then
 		return
@@ -71,12 +75,7 @@ calcXmx () {
 calcXmx "$@"
 
 a_sample_mt() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-	fi
-	local CMD="java $EA $z -cp $CP jgi.A_SampleMT $@"
+	local CMD="java $EA $EOOM $z -cp $CP templates.A_SampleMT $@"
 	echo $CMD >&2
 	eval $CMD
 }

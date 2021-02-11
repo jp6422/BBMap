@@ -3,17 +3,16 @@ package dna;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
-
-import stream.ByteBuilder;
-
-
-import align2.Tools;
 
 import fileIO.ByteFile1;
 import fileIO.ReadWrite;
 import fileIO.TextStreamWriter;
+import shared.Parse;
+import shared.PreParser;
+import shared.Shared;
+import shared.Tools;
+import structures.ByteBuilder;
 
 /**
  * Uses a ByteFile instead of TextFile for better speed and lower memory use.
@@ -24,7 +23,7 @@ import fileIO.TextStreamWriter;
 public class FastaToChromArrays2 {
 	
 //	Example:
-//	jgi.FastaToChromArrays ecoli_K12.fa 1 writeinthread=false genscaffoldinfo=true retain waitforwriting=false 
+//	jgi.FastaToChromArrays ecoli_K12.fa 1 writeinthread=false genscaffoldinfo=true retain waitforwriting=false
 //	gzip=true chromc=false maxlen=536670912 writechroms=true minscaf=1 midpad=300 startpad=8000 stoppad=8000 nodisk=false
 	
 	public static void main(String[] args){
@@ -32,14 +31,17 @@ public class FastaToChromArrays2 {
 	}
 	
 	public static ArrayList<ChromosomeArray> main2(String[] args){
-		System.err.println("Executing "+(new Object() { }.getClass().getEnclosingClass().getName())+" "+Arrays.toString(args)+"\n");
+		
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
+		
 		boolean oldWIT=WRITE_IN_THREAD;
 		WRITE_IN_THREAD=true;
 		
-//		assert(false) : ReadWrite.ZIPLEVEL;
-		
 		String name=null;
-		
 		int genome=-1;
 		int chroms=-1;
 		String infile=null;
@@ -55,11 +57,8 @@ public class FastaToChromArrays2 {
 				final String[] split=arg.split("=");
 				String a=split[0].toLowerCase();
 				String b=split.length>1 ? split[1] : null;
-				if("null".equalsIgnoreCase(b)){b=null;}
-
-				if(Parser.isJavaFlag(arg)){
-					//jvm argument; do nothing
-				}else if(a.equals("null")){
+				
+				if(a.equals("null")){
 					//do nothing
 				}else if(a.equals("path") || a.equals("root") || a.equals("tempdir")){
 					Data.setPath(b);
@@ -73,11 +72,11 @@ public class FastaToChromArrays2 {
 				}else if(a.equals("chroms")){
 					chroms=Integer.parseInt(b);
 				}else if(a.equals("writeinthread")){
-					WRITE_IN_THREAD=Tools.parseBoolean(b);
+					WRITE_IN_THREAD=Parse.parseBoolean(b);
 				}else if(a.equals("nodisk")){
-					NODISK=Tools.parseBoolean(b);
+					NODISK=Parse.parseBoolean(b);
 				}else if(a.equals("writeinfo")){
-					writeinfo=Tools.parseBoolean(b);
+					writeinfo=Parse.parseBoolean(b);
 				}else if(a.equals("padstart") || a.startsWith("startpad") || a.equals("padfront") || a.startsWith("frontpad")){
 					START_PADDING=Integer.parseInt(b);
 				}else if(a.equals("padstop") || a.startsWith("stoppad") || a.equals("padend") || a.startsWith("endpad")){
@@ -89,31 +88,31 @@ public class FastaToChromArrays2 {
 				}else if(a.startsWith("minscaf") || a.startsWith("mincontig")){
 					MIN_SCAFFOLD=Integer.parseInt(b);
 				}else if(a.equals("genscaffoldinfo")){
-					genScaffoldInfo=Tools.parseBoolean(b);
+					genScaffoldInfo=Parse.parseBoolean(b);
 					System.err.println("Set genScaffoldInfo="+genScaffoldInfo);
 				}else if(a.equals("append") || a.equals("app")){
-					append=Tools.parseBoolean(b);
+					append=Parse.parseBoolean(b);
 				}else if(a.equals("overwrite") || a.equals("ow")){
-					overwrite=Tools.parseBoolean(b);
+					overwrite=Parse.parseBoolean(b);
 				}else if(a.equals("mergescaffolds") || a.equals("mergecontigs") || (a.equals("merge"))){
-					MERGE_SCAFFOLDS=Tools.parseBoolean(b);
+					MERGE_SCAFFOLDS=Parse.parseBoolean(b);
 					System.err.println("Set MERGE_SCAFFOLDS="+MERGE_SCAFFOLDS);
 				}else if(a.startsWith("maxlen") || a.startsWith("chromlen")){
-					long len=Tools.parseKMG(b);
+					long len=Parse.parseKMG(b);
 					assert(len>0 && len<=Integer.MAX_VALUE);
 					MAX_LENGTH=(int)len;
 				}else if(a.equals("writechroms")){
-					writeChroms=Tools.parseBoolean(b);
+					writeChroms=Parse.parseBoolean(b);
 				}else if(a.equals("chromgz") || a.equals("gz")){
-					Data.CHROMGZ=Tools.parseBoolean(b);
+					Data.CHROMGZ=Parse.parseBoolean(b);
 				}else if(a.equals("retain")){
-					RETAIN=Tools.parseBoolean(b);
+					RETAIN=Parse.parseBoolean(b);
 				}else if(a.equals("scafprefixes")){
-					scafprefixes=Tools.parseBoolean(b);
+					scafprefixes=Parse.parseBoolean(b);
 				}else if(a.equals("ziplevel") || a.equals("zl")){
 					ReadWrite.ZIPLEVEL=Integer.parseInt(b);
 				}else if(a.equals("waitforwriting")){
-					WAIT_FOR_WRITING=Tools.parseBoolean(b);
+					WAIT_FOR_WRITING=Parse.parseBoolean(b);
 				}else{
 					if(i>2){
 						System.err.println("Unknown parameter "+args[i]);
@@ -282,7 +281,7 @@ public class FastaToChromArrays2 {
 			}
 		}
 		
-		ByteFile1 tf=new ByteFile1(fname, false, false);
+		ByteFile1 tf=new ByteFile1(fname, false);
 		int chrom=1;
 		
 		TextStreamWriter infoWriter=null, scafWriter=null;
@@ -342,7 +341,7 @@ public class FastaToChromArrays2 {
 		}
 		
 		
-		for(ChromosomeArray ca=makeNextChrom(tf, chrom, infoWriter, scafWriter, infolist, scaflist); ca!=null; 
+		for(ChromosomeArray ca=makeNextChrom(tf, chrom, infoWriter, scafWriter, infolist, scaflist); ca!=null;
 				ca=makeNextChrom(tf, chrom, infoWriter, scafWriter, infolist, scaflist)){
 			if(ca.array.length>ca.maxIndex+1){ca.resize(ca.maxIndex+1);}
 			if(RETAIN){r.add(ca);}
@@ -430,7 +429,7 @@ public class FastaToChromArrays2 {
 	}
 	
 	private ChromosomeArray makeNextChrom(ByteFile1 tf, int chrom, TextStreamWriter infoWriter, TextStreamWriter scafWriter, ArrayList<String> infolist, ArrayList<String> scaflist){
-		ChromosomeArray ca=new ChromosomeArray(chrom, (byte)Gene.PLUS, 0, 120000+START_PADDING);
+		ChromosomeArray ca=new ChromosomeArray(chrom, (byte)Shared.PLUS, 0, 120000+START_PADDING);
 		ca.maxIndex=-1;
 		for(int i=0; i<START_PADDING; i++){ca.set(i, 'N');}
 		
@@ -438,9 +437,9 @@ public class FastaToChromArrays2 {
 		
 		int scaffolds=0;
 		if(currentScaffold!=null && currentScaffold.length()>0){
-			assert(currentScaffold.length()>0);
+			assert(currentScaffold.length()>0) : currentScaffold.length();
 			assert(lastHeader!=null);
-			assert(currentScaffold.length()+END_PADDING+ca.maxIndex<MAX_LENGTH);
+			assert(currentScaffold.length()+END_PADDING+ca.maxIndex<MAX_LENGTH) : currentScaffold.length()+", "+END_PADDING+", "+ca.maxIndex+", "+MAX_LENGTH;
 			
 //			System.err.println("A: Writing a scaffold because currentScaffold = "+currentScaffold);
 			scaffoldSum++;
@@ -540,8 +539,8 @@ public class FastaToChromArrays2 {
 			sb.append(s);
 //			for(int i=0; i<s.length(); i++){
 //				char c=s.charAt(i);
-//				assert(Character.isLetter(c));
-//				sb.append(Character.toUpperCase(c));
+//				assert(Tools.isLetter(c));
+//				sb.append(Tools.toUpperCase(c));
 //			}
 		}
 		

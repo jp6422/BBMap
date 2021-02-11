@@ -1,5 +1,4 @@
 #!/bin/bash
-#estherfilter.sh <query> <reference> <cutoff>"
 
 usage(){
 echo "
@@ -23,6 +22,7 @@ Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -37,7 +37,6 @@ popd > /dev/null
 CP="$DIR""current/"
 
 z="-Xmx3200m"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -47,16 +46,13 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 }
 calcXmx "$@"
 
 estherfilter() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module load oracle-jdk/1.7_64bit
-		module load blast
-	fi
-	local CMD="java $EA $z -cp $CP driver.EstherFilter $@"
+	local CMD="java $EA $EOOM $z -cp $CP driver.EstherFilter $@"
 	echo $CMD >&2
 	eval $CMD
 }

@@ -2,8 +2,8 @@ package jgi;
 
 import java.util.Arrays;
 
-import align2.Tools;
-import dna.CoverageArray;
+import shared.Tools;
+import structures.CoverageArray;
 
 /**
  * This class is designed to help calculate coverage of ORFs
@@ -21,6 +21,7 @@ public class Orf implements Comparable<Orf>{
 		assert(stop>start || (start==0 && stop==0));
 	}
 	
+	@Override
 	public String toString(){
 		return name+"\t"+start+"\t"+stop+"\t"+strand;
 	}

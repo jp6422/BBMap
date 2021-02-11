@@ -1,5 +1,4 @@
 #!/bin/bash
-#summarizescafstats in=<infile>
 
 usage(){
 echo "
@@ -27,6 +26,7 @@ Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -41,7 +41,6 @@ popd > /dev/null
 CP="$DIR""current/"
 
 z="-Xmx120m"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -49,12 +48,15 @@ if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
 	exit
 fi
 
+calcXmx () {
+	source "$DIR""/calcmem.sh"
+	setEnvironment
+	parseXmx "$@"
+}
+calcXmx "$@"
+
 summarizescafstats() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-	fi
-	local CMD="java $EA $z -cp $CP driver.SummarizeCoverage $@"
+	local CMD="java $EA $EOOM $z -cp $CP driver.SummarizeCoverage $@"
 #	echo $CMD >&2
 	eval $CMD
 }

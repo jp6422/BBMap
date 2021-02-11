@@ -1,28 +1,26 @@
 #!/bin/bash
-#merge in=<infile> out=<outfile>
 
-function usage(){
+usage(){
 echo "
-BBMerge v9.02
 Written by Brian Bushnell and Jonathan Rood
-Last modified July 14, 2016
+Last modified June 26, 2019
 
 Description:  Merges paired reads into single reads by overlap detection.
-With sufficient coverage, can also merge nonoverlapping reads by kmer extension.
-Kmer modes requires much more memory, and should be used with the bbmerge-auto.sh script.
+With sufficient coverage, can merge nonoverlapping reads by kmer extension.
+Kmer modes (Tadpole or Bloom Filter) require much more memory, and should
+be used with the bbmerge-auto.sh script rather than bbmerge.sh.
+Please read bbmap/docs/guides/BBMergeGuide.txt for more information.
 
 Usage for interleaved files:	bbmerge.sh in=<reads> out=<merged reads> outu=<unmerged reads>
 Usage for paired files:     	bbmerge.sh in1=<read1> in2=<read2> out=<merged reads> outu1=<unmerged1> outu2=<unmerged2>
 
-Input may be stdin or a fasta, fastq, or scarf file, raw or gzipped.
-
+Input may be stdin or a file, fasta or fastq, raw or gzipped.
 
 Input parameters:
 in=null              Primary input. 'in2' will specify a second file.
 interleaved=auto     May be set to true or false to override autodetection of
                      whether the input file as interleaved.
 reads=-1             Quit after this many read pairs (-1 means all).
-
 
 Output parameters:
 out=<file>           File for merged reads. 'out2' will specify a second file.
@@ -38,7 +36,6 @@ ziplevel=2           Set to 1 (lowest) through 9 (max) to change compression
 ordered=f            Output reads in same order as input.
 mix=f                Output both the merged (or mergable) and unmerged reads
                      in the same file (out=).  Useful for ecco mode.
-
 
 Trimming/Filtering parameters:
 qtrim=f              Trim read ends to remove bases with quality below minq.
@@ -69,16 +66,20 @@ forcetrimright2=0    (ftr2) If positive, trim this many bases on the right end.
 forcetrimmod=5       (ftm) If positive, trim length to be equal to 
                      zero modulo this number.
 ooi=f                Output only incorrectly merged reads, for testing.
-trimpolya=t          Trim trailing poly-A tail from adapter output.
-                     Only affects outadapter.
-
+trimpolya=t          Trim trailing poly-A tail from adapter output.  Only 
+                     affects outadapter.  This also trims poly-A followed
+                     by poly-G, which occurs on NextSeq.
 
 Processing Parameters:
 usejni=f             (jni) Do overlapping in C code, which is faster.  Requires
                      compiling the C code; details are in /jni/README.txt.
+                     However, the jni path is currently disabled.
 merge=t              Create merged reads.  If set to false, you can still 
                      generate an insert histogram.
 ecco=f               Error-correct the overlapping part, but don't merge.
+trimnonoverlapping=f (tno) Trim all non-overlapping portions, leaving only
+                     consensus sequence.  By default, only sequence to the 
+                     right of the overlap (adapter sequence) is trimmed.
 useoverlap=t         Attempt find the insert size using read overlap.
 mininsert=35         Minimum insert size to merge reads.
 mininsert0=35        Insert sizes less than this will not be considered.
@@ -106,34 +107,37 @@ iupacton=f           (itn) Change ambiguous IUPAC symbols to N.
 adapter=             Specify the adapter sequences used for these reads, if
                      known; this can be a fasta file or a literal sequence.
                      Read 1 and 2 can have adapters specified independently
-                     with the adapter1 and adapter2 flags. 
+                     with the adapter1 and adapter2 flags.  adapter=default
+                     will use a list of common adapter sequences.
 
+Ratio Mode: 
+ratiomode=t          Score overlaps based on the ratio of matching to 
+                     mismatching bases.
+maxratio=0.09        Max error rate; higher increases merge rate.
+ratiomargin=5.5      Lower increases merge rate; min is 1.
+ratiooffset=0.55     Lower increases merge rate; min is 0.
+maxmismatches=20     Maximum mismatches allowed in overlapping region.
+ratiominoverlapreduction=3  This is the difference between minoverlap in 
+                     flat mode and minoverlap in ratio mode; generally, 
+                     minoverlap should be lower in ratio mode.
+minsecondratio=0.1   Cutoff for second-best overlap ratio.
+forcemerge=f         Disable all filters and just merge everything 
+                     (not recommended).
 
-Normal Mode: 
-normalmode=f         Original BBMerge algorithm.  Faster, but lower overall
-                     merge rate.
+Flat Mode: 
+flatmode=f           Score overlaps based on the total number of mismatching
+                     bases only.
 margin=2             The best overlap must have at least 'margin' fewer 
                      mismatches than the second best.
 mismatches=3         Do not allow more than this many mismatches.
-requireratiomatch=f  (rrm) Require the answer from normal mode and ratio mode
+requireratiomatch=f  (rrm) Require the answer from flat mode and ratio mode
                      to agree, reducing false positives if both are enabled.
 trimonfailure=t      (tof) If detecting insert size by overlap fails,
                      the reads will be trimmed and this will be re-attempted.
 
 
-Ratio Mode: 
-ratiomode=t          Newer algorithm.  Slower, but higher merge rate.
-                     Much better for long overlaps and high error rates.
-maxratio=0.09        Max error rate; higher increases merge rate.
-ratiomargin=5.5      Lower increases merge rate; min is 1.
-ratiooffset=0.55     Lower increases merge rate; min is 0.
-ratiominoverlapreduction=3  This is the difference between minoverlap in 
-                     normal mode and minoverlap in ratio mode; generally, 
-                     minoverlap should be lower in ratio mode.
-minsecondratio=0.1   Cutoff for second-best overlap ratio.
-
-*** Ratio Mode and Normal Mode may be used alone or simultaneously. ***
-*** Ratio Mode is much more accurate and is now the default mode. ***
+*** Ratio Mode and Flat Mode may be used alone or simultaneously. ***
+*** Ratio Mode is usually more accurate and is the default mode. ***
 
 
 Strictness (these are mutually exclusive macros that set other parameters):
@@ -147,8 +151,8 @@ ultraloose=f         (uloose) Increase FP and merging rate even more.
 maxloose=f           (xloose) Maximally decrease FP and merging rate.
 fast=f               Fastest possible mode; less accurate.
 
-
 Tadpole Parameters (for read extension and error-correction):
+*Note: These require more memory and should be run with bbmerge-auto.sh.*
 k=31                 Kmer length.  31 (or less) is fastest and uses the least
                      memory, but higher values may be more accurate.  
                      60 tends to work well for 150bp reads.
@@ -158,8 +162,18 @@ extend2=0            Extend reads this much only after a failed merge attempt,
                      or in rem/rsem mode.
 iterations=1         (ei) Iteratively attempt to extend by extend2 distance
                      and merge up to this many times.
+rem=f                (requireextensionmatch) Do not merge if the predicted
+                     insert size differs before and after extension.
+                     However, if only the extended reads overlap, then that
+                     insert will be used.  Requires setting extend2.
+rsem=f               (requirestrictextensionmatch) Similar to rem but stricter.
+                     Reads will only merge if the predicted insert size before
+                     and after extension match.  Requires setting extend2.
+                     Enables the lowest possible false-positive rate.
 ecctadpole=f         (ecct) If reads fail to merge, error-correct with Tadpole
                      and try again.  This happens prior to extend2.
+reassemble=t         If ecct is enabled, use Tadpole's reassemble mode for 
+                     error correction.  Alternatives are pincer and tail.
 removedeadends       (shave) Remove kmers leading to dead ends.
 removebubbles        (rinse) Remove kmers in error bubbles.
 mindepthseed=3       (mds) Minimum kmer depth to begin extension.
@@ -176,25 +190,37 @@ prealloc=f           Pre-allocate memory rather than dynamically growing;
 prefilter=0          If set to a positive integer, use a countmin sketch to 
                      ignore kmers with depth of that value or lower, to
                      reduce memory usage.
+filtermem=0          Allows manually specifying prefilter memory in bytes, for
+                     deterministic runs.  0 will set it automatically.
 minprob=0.5          Ignore kmers with overall probability of correctness 
                      below this, to reduce memory usage.
-rem=f                (requireextensionmatch) Do not merge if the predicted
-                     insert size differs before and after extension.
-                     However, if only the extended reads overlap, then that
-                     insert will be used.  Requires setting extend2.
-rsem=f               (requirestrictextensionmatch) Similar to rem but stricter.
-                     Reads will only merge if the predicted insert size before
-                     and after extension match.  Requires setting extend2.
+minapproxoverlap=26  For rem mode, do not merge reads if the extended reads
+                     indicate that the raw reads should have overlapped by
+                     at least this much, but no overlap was found.
+
+
+Bloom Filter Parameters (for kmer operations with less memory than Tadpole)
+*Note: These require more memory and should be run with bbmerge-auto.sh.*
+eccbloom=f           (eccb) If reads fail to merge, error-correct with bbcms
+                     and try again.
+testmerge=f          Test kmer counts around the read merge junctions.  If
+                     it appears that the merge created new errors, undo it.
+                     This reduces the false-positive rate, but not as much as
+                     rem or rsem.
 
 Java Parameters:
--Xmx                 This will be passed to Java to set memory usage, 
-                     overriding the program's automatic memory detection.
+-Xmx                 This will set Java's memory usage, 
+                     overriding autodetection.
                      For example, -Xmx400m will specify 400 MB RAM.
+-eoom                This flag will cause the process to exit if an 
+                     out-of-memory exception occurs.  Requires Java 8u92+.
+-da                  Disable assertions.
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -207,10 +233,11 @@ popd > /dev/null
 
 #DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/"
 CP="$DIR""current/"
-NATIVELIBDIR="$DIR""jni/"
+JNI="-Djava.library.path=""$DIR""jni/"
+#JNI=""
 
 z="-Xmx1000m"
-EA="-ea"
+z2="-Xms1000m"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -220,17 +247,13 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 }
 calcXmx "$@"
 
 function merge() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-	fi
-	local CMD="java -Djava.library.path=$NATIVELIBDIR $EA $z -cp $CP jgi.BBMerge $@"
+	local CMD="java $EA $EOOM $z $z2 $JNI -cp $CP jgi.BBMerge $@"
 	echo $CMD >&2
 	eval $CMD
 }

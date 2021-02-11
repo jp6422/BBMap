@@ -1,10 +1,9 @@
 #!/bin/bash
-#splitbytaxa in=<infile> out=<outfile>
 
 usage(){
 echo "
 Written by Brian Bushnell
-Last modified December 15, 2015
+Last modified Jan 7, 2020
 
 Description:   Splits sequences according to their taxonomy,
 as determined by the sequence name.  Sequences should
@@ -30,18 +29,25 @@ level=phylum    Taxonomic level, such as phylum.  Filtering will operate on
 tree=           A taxonomic tree made by TaxTree, such as tree.taxtree.gz.
 table=          A table translating gi numbers to NCBI taxIDs.
                 Only needed if gi numbers will be used.
+                On Genepool, use 'tree=auto table=auto'.
 * Note *
 Tree and table files are in /global/projectb/sandbox/gaag/bbtools/tax
 For non-Genepool users, or to make new ones, use taxtree.sh and gitable.sh
 
 Java Parameters:
--Xmx            This will be passed to Java to set memory usage, overriding the program's automatic memory detection.
-                -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify 200 megs.  The max is typically 85% of physical memory.
+-Xmx            This will set Java's memory usage, overriding automatic
+                memory detection.
+                -Xmx20g will specify 20 gigs of RAM, and -Xmx200m will specify
+                200 megs.  The max is typically 85% of physical memory.
+-eoom           This flag will cause the process to exit if an out-of-memory
+                exception occurs.  Requires Java 8u92+.
+-da             Disable assertions.
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -57,7 +63,6 @@ CP="$DIR""current/"
 
 z="-Xmx4g"
 z2="-Xms4g"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -67,6 +72,7 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 	if [[ $set == 1 ]]; then
 		return
@@ -78,12 +84,7 @@ calcXmx () {
 calcXmx "$@"
 
 splitbytaxa() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-	fi
-	local CMD="java $EA $z -cp $CP tax.SplitByTaxa $@"
+	local CMD="java $EA $EOOM $z -cp $CP tax.SplitByTaxa $@"
 	echo $CMD >&2
 	eval $CMD
 }

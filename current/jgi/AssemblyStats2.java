@@ -3,19 +3,25 @@ package jgi;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-
-import align2.Tools;
+import java.util.Locale;
 
 import dna.AminoAcid;
 import dna.FastaToChromArrays2;
-import dna.Parser;
-import dna.Timer;
 import fileIO.FileFormat;
 import fileIO.ReadWrite;
 import fileIO.TextStreamWriter;
+import json.JsonObject;
+import shared.KillSwitch;
+import shared.MetadataWriter;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 import structures.IntList;
 import structures.LongList;
 
@@ -28,51 +34,24 @@ import structures.LongList;
 public final class AssemblyStats2 {
 	
 	/*--------------------------------------------------------------*/
-	
-	private static void printOptions(){
-		System.err.println("Please consult the shellscript for usage information.");
-//		System.out.println("\nUsage: java -Xmx120m jgi.AssemblyStats2 <input file>");
-//		System.out.println("\nOptional flags:");
-//		System.out.println("in=<file>    \tThe 'in=' flag is only needed if the input file is not the first parameter.  'in=stdin' will pipe from standard in.");
-//		System.out.println("format=1     \tUses variable units like MB and KB, and is designed for compatibility with existing tools.");
-//		System.out.println("format=2     \tUses only whole numbers of bases, with no commas in numbers, and is designed for machine parsing.");
-//		System.out.println("format=3     \tOutputs stats in 2 rows of tab-delimited columns: a header row and a data row.");
-//		System.out.println("format=4     \tLike 3 but with scaffold data only.");
-//		System.out.println("format=5     \tLike 3 but with contig data only.");
-//		System.out.println("format=6     \tLike 3 but the header starts with a #.");
-//		System.out.println("format=7     \tLike 1 but without scaffold data.");
-//		System.out.println("gc=<file>    \tPrint gc statistics per scaffold to a file (or stdout).");
-//		System.out.println("gcformat=1   \tid start stop A C G T N GC");
-//		System.out.println("gcformat=2   \tid gc");
-//		System.out.println("gcformat=3   \tid length A C G T N GC");
-//		System.out.println("gcformat=4   \tid length gc");
-//		System.out.println("gchist=<file>\tPrint gc content histogram to this file.");
-//		System.out.println("gcbins=200   \tNumber of bins in gc histogram.");
-//		System.out.println("n=10         \tMinimum number of consecutive Ns between contigs.");
-//		System.out.println("k=13         \tDisplay BBMap's estimated memory usage for this genome with specified kmer length.");
-//		System.out.println("showspeed=t  \tSet to 'f' to suppress display of processing speed.");
-//		System.out.println("minscaf=0    \tIgnore scaffolds shorter than this.");
-//		System.out.println("n_=t         \tThis flag will prefix the terms 'contigs' and 'scaffolds' with 'n_' in formats 3-6.");
-//		System.out.println("verbose=t    \tSet to false to remove superfluous info.");
-//		System.out.println("Output is always tab-delimited.  AGCT are fractions of defined bases; N is fraction of total bases.");
-	}
-	
-	/*--------------------------------------------------------------*/
 
 	public static void main(String[] args){
-		AssemblyStats2 as=new AssemblyStats2(args);
-		as.process();
+		AssemblyStats2 x=new AssemblyStats2(args);
+		x.process();
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(outstream);
 	}
 	
 	public AssemblyStats2(String[] args){
 		
-		args=Parser.parseConfig(args);
-		if(Parser.parseHelp(args, true)){
-			printOptions();
-			System.exit(0);
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, outstream, null, false);
+			if(Shared.mainClass==null){Shared.mainClass=this.getClass();}
+			args=pp.args;
+			outstream=pp.outstream;
 		}
 		
-		Timer t=new Timer();
 		ReadWrite.USE_UNPIGZ=ReadWrite.USE_PIGZ=true;
 		
 		int GCBINS_=200;
@@ -86,12 +65,8 @@ public final class AssemblyStats2 {
 				String[] split=arg.split("=");
 				String a=split[0].toLowerCase();
 				String b=split.length>1 ? split[1] : null;
-				if("null".equalsIgnoreCase(b)){b=null;}
-				if(a.charAt(0)=='-' && (a.indexOf('.')<0 || i>0)){a=a.substring(1);}
 				
-				if(Parser.isJavaFlag(arg)){
-					//jvm argument; do nothing
-				}else if(Parser.parseCommonStatic(arg, a, b)){
+				if(Parser.parseCommonStatic(arg, a, b)){
 					//do nothing
 				}else if(Parser.parseZip(arg, a, b)){
 					//do nothing
@@ -129,48 +104,81 @@ public final class AssemblyStats2 {
 						gc=null;
 					}
 				}else if(a.equals("benchmark")){
-					benchmark=Tools.parseBoolean(b);
+					benchmark=Parse.parseBoolean(b);
 					if(benchmark){
 						out=null;
 						gc=null;
 					}
 				}else if(a.equals("format")){
-					FORMAT=Integer.parseInt(b);
-					if(FORMAT<0 || FORMAT>7){
-						throw new RuntimeException("\nUnknown format: "+FORMAT+"; valid values are 1 through 7.\n");
+					if("json".equalsIgnoreCase(b)){FORMAT=8;}
+					else{FORMAT=Integer.parseInt(b);}
+					if(FORMAT<0 || FORMAT>8){
+						throw new RuntimeException("\nUnknown format: "+FORMAT+"; valid values are 1 through 8.\n");
 					}
+				}else if(a.equals("json")){
+					if(Parse.parseBoolean(b)){FORMAT=8;}
+					else{FORMAT=1;}
 				}else if(a.equals("gcformat")){
 					GCFORMAT=Integer.parseInt(b);
-					if(GCFORMAT<0 || GCFORMAT>4){
-						throw new RuntimeException("\nUnknown gcformat: "+GCFORMAT+"; valid values are 0 through 4.\n");
+					if(GCFORMAT<0 || GCFORMAT>5){
+						throw new RuntimeException("\nUnknown gcformat: "+GCFORMAT+"; valid values are 0 through 5.\n");
 					}
 				}else if(a.equals("cutoff")){
-					cutoff=Tools.parseKMG(b);
+					cutoff=Parse.parseKMG(b);
 				}else if(a.equals("k") || a.equals("bbmapkmer")){
 					bbmapkmer=Integer.parseInt(b);
+				}else if(a.equals("printl90") || a.equals("l90") || a.equals("printn90") || a.equals("n90")){
+					printL90=Parse.parseBoolean(b);
+				}else if(a.equals("printextended") || a.equals("extended")){
+					printExtended=Parse.parseBoolean(b);
 				}else if(a.equals("overwrite") || a.equals("ow")){
-					overwrite=Tools.parseBoolean(b);
+					overwrite=Parse.parseBoolean(b);
 				}else if(a.equals("n_")){
-					N_UNDERSCORE=Tools.parseBoolean(b);
+					N_UNDERSCORE=Parse.parseBoolean(b);
 				}else if(a.equals("header") || a.equals("useheader")){
-					useheader=Tools.parseBoolean(b);
+					useheader=Parse.parseBoolean(b);
 				}else if(a.equals("addfilename") || a.equals("addname")){
-					addfilename=Tools.parseBoolean(b);
+					addfilename=Parse.parseBoolean(b);
 				}else if(a.equals("minscaf") || a.equals("mincontig") || a.equals("minlen") || a.equals("min")){
-					MINSCAF_=Integer.parseInt(b);
+					MINSCAF_=Parse.parseIntKMG(b);
 				}else if(a.equals("showspeed") || a.equals("ss")){
-					showspeed=Tools.parseBoolean(b);
+					showspeed=Parse.parseBoolean(b);
 				}else if(a.equals("printheadersize") || a.equals("phs")){
-					printheadersize=Tools.parseBoolean(b);
+					printheadersize=Parse.parseBoolean(b);
 				}else if(a.equals("skipduplicatelines") || a.equals("sdl")){
-					skipDuplicateLines=Tools.parseBoolean(b);
+					skipDuplicateLines=Parse.parseBoolean(b);
 				}else if(a.equals("printduplicatelines") || a.equals("pdl")){
-					skipDuplicateLines=!Tools.parseBoolean(b);
+					skipDuplicateLines=!Parse.parseBoolean(b);
 				}else if(a.equals("showbbmap")){
-					if(!Tools.parseBoolean(b)){bbmapkmer=0;}
-				}else if(a.equals("contigbreak") || (arg.contains("=") && (a.equals("n") || a.equals("-n")))){
+					if(!Parse.parseBoolean(b)){bbmapkmer=0;}
+				}else if(a.equals("contigbreak") || (arg.contains("=") && (a.equals("n")))){
 					maxNs=Integer.parseInt(b);
-				}else if(i>0 && (a.equals("n") || a.equals("-n")) && b!=null){
+				}
+				
+				else if(a.equals("logsumoffset") || a.equals("logoffset")){
+					logSumOffset=Integer.parseInt(b);
+				}else if(a.equals("logsumbase") || a.equals("logbase")){
+					logSumBase=Double.parseDouble(b);
+				}else if(a.equals("squarelog") || a.equals("logsquare") || a.equals("logsquared")){
+					squareLog=Parse.parseBoolean(b);
+				}else if(a.equals("logpower")){
+					logPower=Double.parseDouble(b);
+				}else if(a.equals("powsum") || a.equals("powersum") || a.equals("powersumpower") || a.equals("powsumpower")){
+					powSumPower=Double.parseDouble(b);
+				}
+				
+				else if(a.equalsIgnoreCase("assemblyScoreMinLen")){
+					assemblyScoreMinLen=Parse.parseKMG(b);
+				}else if(a.equalsIgnoreCase("assemblyScoreMaxLen")){
+					assemblyScoreMaxLen=Parse.parseKMG(b);
+				}else if(a.equalsIgnoreCase("alignedFraction") || a.equalsIgnoreCase("aligned") || a.equalsIgnoreCase("mapped")){
+					alignedFraction=Double.parseDouble(b);
+					if(alignedFraction>1){alignedFraction/=100;}
+				}else if(a.equals("score") || a.equals("assemblyscore")){
+					printAssemblyScore=Parse.parseBoolean(b);
+				}
+				
+				else if(i>0 && (a.equals("n") || a.equals("-n")) && b!=null){
 					maxNs=Integer.parseInt(b);
 				}else if(in==null && i==0 && !arg.contains("=")){
 					in=arg;
@@ -178,6 +186,10 @@ public final class AssemblyStats2 {
 					throw new RuntimeException("Unknown parameter "+arg);
 				}
 			}
+		}
+		
+		if(printExtended){
+			printL90=true;
 		}
 		
 		{//Process parser fields
@@ -245,11 +257,12 @@ public final class AssemblyStats2 {
 			try {
 				ff=FileFormat.testInput(in, FileFormat.FA, null, false, true, true);
 			} catch (Throwable e) {
-				//Ignore
+				e.printStackTrace();
 			}
 			if(ff!=null){
 				fastqMode=ff.fastq();
 			}
+			assert(!ff.samOrBam()) : "AssemblyStats does not support sam/bam files, only fasta and fastq.";
 //			assert(ff==null || (!ff.fastq())) : "AssemblyStats only supports fasta files.  To override this message, use the -da flag.";
 		}
 		
@@ -272,18 +285,18 @@ public final class AssemblyStats2 {
 			e.printStackTrace();
 		}
 		
-		if(tlist!=null && tlist.size()>0){Collections.sort(tlist);}
-		if(llist!=null && llist.size>0){Arrays.sort(llist.array, 0, llist.size);}
+		if(tlist!=null && tlist.size()>0){Shared.sort(tlist);}
+		if(llist!=null && llist.size>0){Shared.sort(llist.array, 0, llist.size);}
 		
 		t.stop();
 		
 		if(benchmark){
 			printBenchResults(t, counts, sum, in);
 		}else{
-//			System.err.println("\nclist="+clist+"\nslist="+slist+"\nsclist1="+sclist1+"\nsclist2="+sclist2+"\nllist="+llist+"\ntlist="+tlist+"\n"); //***
-//			System.err.println("\nclist.size="+clist.size+"\nslist.size="+slist.size+"\nsclist1.size="+sclist1.size+"\nsclist2.size="+sclist2.size+"\nllist.size="+llist.size+"\ntlist.size()="+tlist.size()+"\n"); //***
-			printResults(t, counts, sum, gc_std, in, clist, slist, sclist1, sclist2, llist, tlist, out);
-//			System.err.println("Printed results to "+out);
+//			outstream.println("\nclist="+clist+"\nslist="+slist+"\nsclist1="+sclist1+"\nsclist2="+sclist2+"\nllist="+llist+"\ntlist="+tlist+"\n"); //***
+//			outstream.println("\nclist.size="+clist.size+"\nslist.size="+slist.size+"\nsclist1.size="+sclist1.size+"\nsclist2.size="+sclist2.size+"\nllist.size="+llist.size+"\ntlist.size()="+tlist.size()+"\n"); //***
+			printResults(t, counts, sum, minScaffold, gc_std, in, clist, slist, sclist1, sclist2, llist, tlist, out);
+//			outstream.println("Printed results to "+out);
 			writeHistFile(scaffoldHistFile, slist, tlist, false);
 			
 			if(gchistFile!=null){printGCHist(gchistFile);}
@@ -297,7 +310,7 @@ public final class AssemblyStats2 {
 		long limsum=0;
 		long headerlen=0;
 		final byte[] buf=new byte[32768];
-		final TextStreamWriter tswgc=(gcout==null ? null : new TextStreamWriter(gcout, overwrite, false, false));
+		final TextStreamWriter tswgc=(gcout==null ? null : new TextStreamWriter(gcout, overwrite, append, false));
 		if(tswgc!=null){
 			tswgc.start();
 			if(GCFORMAT==0 || GCFORMAT==1){
@@ -308,13 +321,15 @@ public final class AssemblyStats2 {
 				tswgc.println("#Name\tLength\tA\tC\tG\tT\tN\tIUPAC\tOther\tGC");
 			}else if(GCFORMAT==4){
 				tswgc.println("#Name\tLength\tGC");
+			}else if(GCFORMAT==5){
+				tswgc.println("#Name\tLength\tGC\tlogsum\tpowersum");
 			}else{
 				throw new RuntimeException("Unknown format.");
 			}
 		}
 //		assert(false) : GCFORMAT+", "+out+", "+tswgc;
-		final long[] counts=new long[8];
-		final long[] overall=new long[8];
+		final long[] counts=KillSwitch.allocLong1D(8);
+		final long[] overall=KillSwitch.allocLong1D(8);
 		final StringBuilder hdr=(gcout==null ? null : new StringBuilder());
 		boolean hdmode=false;
 		
@@ -368,6 +383,7 @@ public final class AssemblyStats2 {
 			if(!hdmode){//Scan bases
 				while(i<lim){
 					final byte c=buf[i];
+					assert(c>=0) : i+(hdr==null ? "Non-ascii input." : "\nError with header: "+hdr);
 					final byte cnum=charToNum[c];
 					i++;
 
@@ -414,7 +430,7 @@ public final class AssemblyStats2 {
 
 
 								if(hdr!=null){
-									tswgc.print(toString2(hdr, counts));
+									if(tswgc!=null){tswgc.print(toString2(hdr, counts));}//if added for compiler benefit
 									headerlen+=hdr.length();
 									hdr.setLength(0);
 								}
@@ -536,7 +552,7 @@ public final class AssemblyStats2 {
 //				sclist2.increment(scaffoldlen, contiglensum);
 
 				if(hdr!=null){
-					tswgc.print(toString2(hdr, counts));
+					if(tswgc!=null){tswgc.print(toString2(hdr, counts));}//if added for compiler benefit
 					hdr.setLength(0);
 				}
 
@@ -556,7 +572,7 @@ public final class AssemblyStats2 {
 			}
 		}
 		
-//		System.err.println("clist="+clist+"\nslist="+slist+"\nsclist1="+sclist1+"\nsclist2="+sclist2+"\nllist="+llist+"\ntlist="+tlist); //***
+//		outstream.println("clist="+clist+"\nslist="+slist+"\nsclist1="+sclist1+"\nsclist2="+sclist2+"\nllist="+llist+"\ntlist="+tlist); //***
 		
 		
 		if(tswgc!=null){
@@ -597,13 +613,15 @@ public final class AssemblyStats2 {
 				tswgc.println("#Name\tLength\tA\tC\tG\tT\tN\tIUPAC\tOther\tGC");
 			}else if(GCFORMAT==4){
 				tswgc.println("#Name\tLength\tGC");
+			}else if(GCFORMAT==5){
+				tswgc.println("#Name\tLength\tGC\tlogsum\tpowersum");
 			}else{
 				throw new RuntimeException("Unknown format.");
 			}
 		}
 //		assert(false) : GCFORMAT+", "+out+", "+tswgc;
-		final long[] counts=new long[8];
-		final long[] overall=new long[8];
+		final long[] counts=KillSwitch.allocLong1D(8);
+		final long[] overall=KillSwitch.allocLong1D(8);
 		final StringBuilder hdr=(gcout==null ? null : new StringBuilder());
 		int line=0;
 		
@@ -621,14 +639,14 @@ public final class AssemblyStats2 {
 		
 		while(lim>0){
 			if(line==0){//Scan to end of header.
-//				System.err.println("1");
+//				outstream.println("1");
 				if(hdr==null){//Header is not being stored
 					while(i<lim){
 						final byte c=buf[i];
 						i++;
 						if(c<=slashr){
 							line++;
-//							System.err.println("1.1");
+//							outstream.println("1.1");
 							contiglen=0;
 //							contiglensum=0;
 							scaffoldlen=0;
@@ -644,7 +662,7 @@ public final class AssemblyStats2 {
 						i++;
 						if(c<=slashr){
 							line++;
-//							System.err.println("1.2");
+//							outstream.println("1.2");
 							contiglen=0;
 //							contiglensum=0;
 							scaffoldlen=0;
@@ -658,7 +676,7 @@ public final class AssemblyStats2 {
 			}
 			
 			if(line==1){//Scan bases
-//				System.err.println("2");
+//				outstream.println("2");
 				while(i<lim){
 					final byte c=buf[i];
 					final byte cnum=charToNum[c];
@@ -667,7 +685,7 @@ public final class AssemblyStats2 {
 					if(c<=slashr){//Finish the contig
 //						assert(false) : scaffoldlen;
 						line=(line+1)&3;
-//						System.err.println("2.1");
+//						outstream.println("2.1");
 						if(scaffoldlen>0){//if the scaffold was not blank
 							
 							{//NEW
@@ -708,7 +726,7 @@ public final class AssemblyStats2 {
 
 
 								if(hdr!=null){
-									tswgc.print(toString2(hdr, counts));
+									if(tswgc!=null){tswgc.print(toString2(hdr, counts));}//if added for compiler benefit
 									headerlen+=hdr.length();
 									hdr.setLength(0);
 								}
@@ -767,14 +785,14 @@ public final class AssemblyStats2 {
 				}
 			}
 
-//			System.err.println("3");
+//			outstream.println("3");
 			if(i>=lim){
 				i=0;
 				lim=is.read(buf);
 				limsum+=lim;
 			}
 
-//			System.err.println("4");
+//			outstream.println("4");
 			assert(line>1 || lim<=i || i==0) : line+", "+i+", "+lim;
 			while(i<lim && line>1){
 				final byte c=buf[i];
@@ -811,7 +829,7 @@ public final class AssemblyStats2 {
 	
 	private void printGCHist(String gchistFile){
 		if(!Tools.canWrite(gchistFile, overwrite)){
-			System.err.println("Can't write gc histogram because file exists and overwrite="+overwrite);
+			outstream.println("Can't write gc histogram because file exists and overwrite="+overwrite);
 			assert(false);
 		}else{
 			long gchistFilesum=Tools.sum(gchistArray_downsampled);
@@ -821,9 +839,9 @@ public final class AssemblyStats2 {
 			double invbins=1.0/(gcbins==0 ? 1 : gcbins);
 //			assert(false) : Arrays.toString(gchistArray);
 			StringBuilder sb=new StringBuilder();
-			sb.append(String.format("#GC\tscaffolds\tfraction\tlength\tlen_fraction\n"));
+			sb.append(String.format(Locale.ROOT, "#GC\tscaffolds\tfraction\tlength\tlen_fraction\n"));
 			for(int i=0; i<gcbins; i++){
-				sb.append(String.format("%."+gchistDecimals1+"f\t%d\t%.5f\t%d\t%.5f\n", 
+				sb.append(String.format(Locale.ROOT, "%."+gchistDecimals1+"f\t%d\t%.5f\t%d\t%.5f\n",
 						i*invbins, gchistArray_downsampled[i], gchistArray_downsampled[i]*invsum, gchist_by_base_downsampled[i], gchist_by_base_downsampled[i]*invsumbb));
 			}
 			if(gchistFile.equalsIgnoreCase("stdout")){
@@ -836,17 +854,171 @@ public final class AssemblyStats2 {
 	
 	
 	public static void printBenchResults(Timer t, long[] counts, long sum, String in){
-		System.err.println("Time: \t"+t);
+		outstream.println("Time: \t"+t);
 		long bytes=new File(in).length();
 		if(bytes<1){bytes=LIMSUM;}
 		double mbps1=bytes*1000d/t.elapsed;
 		double mbps2=sum*1000d/t.elapsed;
-		System.err.println(String.format("Raw Speed:         \t%.2f MBytes/s",mbps1));
-		System.err.println(String.format("Uncompressed Speed:\t%.2f MBytes/s",mbps2));
+		outstream.println(String.format(Locale.ROOT, "Raw Speed:         \t%.2f MBytes/s",mbps1));
+		outstream.println(String.format(Locale.ROOT, "Uncompressed Speed:\t%.2f MBytes/s",mbps2));
 	}
 	
+	public static double calcLogSumContigs(LongList clist, LongList llist, int cutoff, double base){
+		return calcLogSumCounts(clist, cutoff, base)+calcLogSumLengths(llist, cutoff, base);
+	}
 	
-	public static void printResults(Timer t, long[] counts, long sum, double gc_std, String in, LongList clist, LongList slist, LongList sclist1, LongList sclist2, 
+	public static double calcLogSumScaffolds(LongList slist, ArrayList<Triple> tlist, int cutoff, double base){
+		return calcLogSumCounts(slist, cutoff, base)+calcLogSumTriples(tlist, cutoff, base);
+	}
+	
+	public static double calcPowerSumContigs(LongList clist, LongList llist, int cutoff, double power){
+		return calcPowerSumCounts(clist, cutoff, power)+calcPowerSumLengths(llist, cutoff, power);
+	}
+	
+	public static double calcPowerSumScaffolds(LongList slist, ArrayList<Triple> tlist, int cutoff, double power){
+		return calcPowerSumCounts(slist, cutoff, power)+calcPowerSumTriples(tlist, cutoff, power);
+	}
+	
+	public static double calcAssemblyScore(LongList slist, ArrayList<Triple> tlist, long min, long max, double aligned){
+		long lengthSum=0;
+		double scoreSum=0;
+		for(int i=(int)min; i<slist.size(); i++){
+			long count=slist.get(i);
+			lengthSum+=(i*count);
+		}
+		for(Triple t : tlist){
+			lengthSum+=t.length;
+		}
+		
+		double mult=1.0/(1000*lengthSum);
+		for(int i=(int)min; i<slist.size(); i++){
+			long count=slist.get(i);
+			if(count>0){
+				scoreSum+=count*(i*Tools.min(max, i))*mult;
+			}
+		}
+		for(Triple t : tlist){
+			scoreSum+=(t.length*Tools.min(max, t.length))*mult;
+		}
+		
+		return scoreSum+aligned*50;
+	}
+	
+	public static double calcLogSumCounts(LongList counts, int cutoff, double base){
+		final double mult=1/Math.log(base);
+		
+		double sum=0;
+		for(int i=cutoff, max=counts.size(); i<max; i++){
+			long count=counts.get(i);
+			if(count>0){
+				double log=mult*Math.log(i);
+				if(squareLog){log=log*log*0.05;}
+				else if(logPower!=1){log=Math.pow(log*0.12, logPower);}
+				double incr=log*count*i;
+				sum+=incr;
+			}
+		}
+		return sum;
+	}
+	
+	private static double logsum(long len){
+		if(len<logSumOffset){return 0;}
+		final double mult=1/Math.log(logSumBase);
+		double log=mult*Math.log(len);
+		if(squareLog){log=log*log*0.05;}
+		else if(logPower!=1){log=Math.pow(log*0.12, logPower);}
+		double incr=log*len;
+		return incr/logSumOffset;
+	}
+	
+	public static double calcLogSumLengths(LongList lengths, int cutoff, double base){
+		final double mult=1/Math.log(base);
+		
+		double sum=0;
+		for(int i=0, max=lengths.size(); i<max; i++){
+			long length=lengths.get(i);
+			if(length>=cutoff){
+				double log=mult*Math.log(length);
+				if(squareLog){log=log*log*0.05;}
+				else if(logPower!=1){log=Math.pow(log*0.12, logPower);}
+				double incr=log*length;
+				sum+=incr;
+			}
+		}
+		return sum;
+	}
+	
+	public static double calcLogSumTriples(ArrayList<Triple> triples, int cutoff, double base){
+		final double mult=1/Math.log(base);
+		
+		double sum=0;
+		for(int i=0, max=triples.size(); i<max; i++){
+			long length=triples.get(i).length;
+			if(length>=cutoff){
+				double log=mult*Math.log(length);
+				if(squareLog){log=log*log*0.05;}
+				else if(logPower!=1){log=Math.pow(log*0.12, logPower);}
+				double incr=log*length;
+				sum+=incr;
+			}
+		}
+		return sum;
+	}
+	
+	public static double calcPowerSumCounts(LongList counts, int cutoff, double power){
+		final double mult=1/Math.pow(1000, power);
+		
+		double sum=0;
+		for(int i=cutoff, max=counts.size(); i<max; i++){
+			long count=counts.get(i);
+			if(count>0){
+				double pow=mult*Math.pow(i, power);
+				double incr=pow*count*i;
+				sum+=incr;
+			}
+		}
+		return sum;
+	}
+	
+	private static double powersum(long len){
+		if(len<logSumOffset){return 0;}
+		final double mult=1/Math.pow(1000, powSumPower);
+		double pow=mult*Math.pow(len, powSumPower);
+		double incr=pow*len;
+		return incr/logSumOffset;
+	}
+	
+	public static double calcPowerSumLengths(LongList lengths, int cutoff, double power){
+		final double mult=1/Math.pow(1000, power);
+		
+		double sum=0;
+		for(int i=0, max=lengths.size(); i<max; i++){
+			long length=lengths.get(i);
+			if(length>=cutoff){
+				double pow=mult*Math.pow(length, power);
+				double incr=pow*length;
+				sum+=incr;
+			}
+		}
+		return sum;
+	}
+	
+	public static double calcPowerSumTriples(ArrayList<Triple> triples, int cutoff, double power){
+		final double mult=1/Math.pow(1000, power);
+		
+		double sum=0;
+		for(int i=0, max=triples.size(); i<max; i++){
+			long length=triples.get(i).length;
+			if(length>=cutoff){
+				double pow=mult*Math.pow(length, power);
+				double incr=pow*length;
+				sum+=incr;
+			}
+		}
+		return sum;
+	}
+	
+	public static void printResults(Timer t, long[] counts, long sum, long minScaffold, double gc_std, String in, LongList clist, LongList slist, LongList sclist1, LongList sclist2,
 			LongList llist, ArrayList<Triple> tlist, String out){
 		
 		String name=in;
@@ -914,19 +1086,21 @@ public final class AssemblyStats2 {
 		
 		if(FORMAT==0){
 		}else if(FORMAT==1){
-			sb.append("Main genome scaffold sequence total:\t"+String.format("%.3f MB",scaflen/1000000f)+"\n");
-			sb.append("Main genome contig sequence total:  \t"+String.format("%.3f MB  \t%.3f%% gap",contiglen/1000000f,(scaflen-contiglen)*100f/scaflen)+"\n");
+			sb.append("Main genome scaffold sequence total:\t"+String.format(Locale.ROOT, "%.3f MB",scaflen/1000000f)+"\n");
+			sb.append("Main genome contig sequence total:  \t"+String.format(Locale.ROOT, "%.3f MB  \t%.3f%% gap",contiglen/1000000f,(scaflen-contiglen)*100f/scaflen)+"\n");
 		}else if(FORMAT==2){
 			sb.append("Main genome scaffold sequence total:\t"+scaflen+"\n");
-			sb.append("Main genome contig sequence total:  \t"+String.format("%d  \t%.3f%% gap",contiglen,(scaflen-contiglen)*100f/scaflen)+"\n");
+			sb.append("Main genome contig sequence total:  \t"+String.format(Locale.ROOT, "%d  \t%.3f%% gap",contiglen,(scaflen-contiglen)*100f/scaflen)+"\n");
 		}else if(FORMAT==3 || FORMAT==6){
 			
 		}else if(FORMAT==4){
 			
 		}else if(FORMAT==5){
 			
+		}else if(FORMAT==8){
+			
 		}else if(FORMAT==7){
-			sb.append("Main genome contig sequence total:  \t"+String.format("%.3f MB",contiglen/1000000f)+"\n");
+			sb.append("Main genome contig sequence total:  \t"+String.format(Locale.ROOT, "%.3f MB",contiglen/1000000f)+"\n");
 		}else{throw new RuntimeException("Unknown format");}
 		
 		if(FORMAT<3){
@@ -955,7 +1129,7 @@ public final class AssemblyStats2 {
 				minScaf=(int)Tools.min(tlist.get(0).length, 250000000);
 			}
 			if(minScaf<1){minScaf=1;}
-			int[] temp=new int[] {0, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 
+			int[] temp=new int[] {0, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000,
 					250000, 500000, 1000000, 2500000, 5000000, 10000000, 25000000, 50000000, 100000000, 250000000};
 			ArrayList<Integer> tempList=new ArrayList<Integer>();
 			tempList.add(0);
@@ -975,7 +1149,7 @@ public final class AssemblyStats2 {
 				lims[i]=tempList.get(i);
 			}
 		}else{
-			lims=new int[] {0, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 
+			lims=new int[] {0, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000,
 					250000, 500000, 1000000, 2500000, 5000000, 10000000, 25000000, 50000000, 100000000, 250000000};
 		}
 		
@@ -986,17 +1160,26 @@ public final class AssemblyStats2 {
 		long clen=contiglen;
 		long slen=scaflen;
 		
-		long cn50=-1;
 		long ln50=-1;
-		long cl50=-1;
 		long ll50=-1;
+		long cn50=-1;
+		long cl50=-1;
+
+		long ln90=-1;
+		long ll90=-1;
+		long cn90=-1;
+		long cl90=-1;
+
+		long s50=slen/2;
+		long c50=clen/2;
 		
-		long shalf=slen/2;
-		long chalf=clen/2;
+		long s90=(int)(slen*0.9f);
+		long c90=(int)(clen*0.9f);
 
 		final int numOverCutoff=(FORMAT==7 ? 1000 : 50000);
 		final int numOverCutoffPlusOne=numOverCutoff+1;
 		long numOver50=0;
+		long basesOver50=0;
 		float fractionOver50=0;
 		
 		
@@ -1039,7 +1222,7 @@ public final class AssemblyStats2 {
 				if(i==next){
 					prevLine=formatX(next, ssum, csum, slen, clen);
 //					if(!skipDuplicateLines || ssum!=prevSsum || csum!=prevCsum || slen!=prevSlen || clen!=prevClen){
-					if(prevLine!=null){
+					if(prevLine!=null && (next==0 || next>=minScaffold)){
 						sb2.append(prevLine);
 						sb2.append('\n');
 						prevLine=null;
@@ -1057,6 +1240,7 @@ public final class AssemblyStats2 {
 
 				if(i==numOverCutoffPlusOne){
 					numOver50=ssum;
+					basesOver50=slen;
 					fractionOver50=slen*100f/scaflen;
 				}
 
@@ -1072,9 +1256,14 @@ public final class AssemblyStats2 {
 					slen-=(b*i);
 				}
 
-				if(ln50==-1 && slen<=shalf){
+				if(ln50==-1 && slen<=s50){
 					ln50=i;
 					ll50=ssum+b;
+				}
+
+				if(ln90==-1 && slen<=s90){
+					ln90=i;
+					ll90=ssum+b;
 				}
 				//			System.out.println("<A4>\tb="+b+", c="+c+", d="+d+", csum="+csum+", ssum="+ssum+", clen="+clen+", slen="+slen);
 
@@ -1088,7 +1277,7 @@ public final class AssemblyStats2 {
 					
 					prevLine=formatX(next, ssum, csum, slen, clen);
 //					if(!skipDuplicateLines || ssum!=prevSsum || csum!=prevCsum || slen!=prevSlen || clen!=prevClen){
-						if(prevLine!=null){
+						if(prevLine!=null && (next==0 || next>=minScaffold)){
 							sb2.append(prevLine);
 							sb2.append('\n');
 							prevLine=null;
@@ -1104,6 +1293,7 @@ public final class AssemblyStats2 {
 
 				if(numOver50==0 && tp.length>numOverCutoff){
 					numOver50=ssum;
+					basesOver50=slen;
 					fractionOver50=slen*100f/scaflen;
 				}
 
@@ -1119,9 +1309,14 @@ public final class AssemblyStats2 {
 					slen-=b;
 				}
 
-				if(ln50==-1 && slen<=shalf){
+				if(ln50==-1 && slen<=s50){
 					ln50=b;
 					ll50=ssum+1;
+				}
+
+				if(ln90==-1 && slen<=s90){
+					ln90=b;
+					ll90=ssum+1;
 				}
 
 			}
@@ -1139,9 +1334,14 @@ public final class AssemblyStats2 {
 			csum-=a;
 			clen-=a*i;
 			
-			if(cn50==-1 && clen<=chalf){
+			if(cn50==-1 && clen<=c50){
 				cn50=i;
 				cl50=csum+a;
+			}
+			
+			if(cn90==-1 && clen<=c90){
+				cn90=i;
+				cl90=csum+a;
 			}
 		}
 
@@ -1151,25 +1351,49 @@ public final class AssemblyStats2 {
 			csum-=1;
 			clen-=a;
 			
-			if(cn50==-1 && clen<=chalf){
+			if(cn50==-1 && clen<=c50){
 				cn50=a;
 				cl50=csum+1;
 			}
+			
+			if(cn90==-1 && clen<=c90){
+				cn90=a;
+				cl90=csum+1;
+			}
 		}
-		
-		cn50=Tools.max(cn50, 0);
-		ln50=Tools.max(ln50, 0);
-		cl50=Tools.max(cl50, 0);
-		ll50=Tools.max(ll50, 0);
 
+		ln50=Tools.max(ln50, 0);
+		ll50=Tools.max(ll50, 0);
+		cn50=Tools.max(cn50, 0);
+		cl50=Tools.max(cl50, 0);
+		
+		ln90=Tools.max(ln90, 0);
+		ll90=Tools.max(ll90, 0);
+		cn90=Tools.max(cn90, 0);
+		cl90=Tools.max(cl90, 0);
+
+		double sLogSum=calcLogSumScaffolds(slist, tlist, logSumOffset, 2);
+		double cLogSum=calcLogSumContigs(clist, llist, logSumOffset, 2);
+		double sPowSum=calcPowerSumScaffolds(slist, tlist, logSumOffset, powSumPower);
+		double cPowSum=calcPowerSumContigs(clist, llist, logSumOffset, powSumPower);
+		double sAssemblyScore=calcAssemblyScore(slist, tlist, assemblyScoreMinLen, assemblyScoreMaxLen, alignedFraction);
+		
 //		ByteStreamWriter tsw=new ByteStreamWriter((out==null ? "stdout" : out) , overwrite, append, false);
 		TextStreamWriter tsw=new TextStreamWriter((out==null ? "stdout" : out) , overwrite, append, false);
 		tsw.start();
 		
 		lastL50=ln50;
+		lastL90=ln90;
 		lastSize=contiglen;
 		lastContigs=contigs;
 		lastMaxContig=maxContig;
+		lastLogSum=sLogSum;
+
+		String sLogSumString=String.format((sLogSum/logSumOffset>=10000 ? "%.0f" : "%.3f"), sLogSum/logSumOffset);
+		String cLogSumString=String.format((cLogSum/logSumOffset>=10000 ? "%.0f" : "%.3f"), cLogSum/logSumOffset);
+		String sPowSumString=String.format((sPowSum/logSumOffset>=10000 ? "%.0f" : "%.3f"), sPowSum/logSumOffset);
+		String cPowSumString=String.format((cPowSum/logSumOffset>=10000 ? "%.0f" : "%.3f"), cPowSum/logSumOffset);
+		String sAssemblyScoreString=String.format((sAssemblyScore>=10000 ? "%.0f" : "%.3f"), sAssemblyScore);
 		
 		if(FORMAT<1){
 			//Do nothing
@@ -1178,10 +1402,25 @@ public final class AssemblyStats2 {
 			if(addfilename){sb.append("Filename:                           \t"+name+"\n");}
 			sb.append("Main genome scaffold N/L50:         \t"+ll50+"/"+formatKB(ln50, 3, 0)+"\n");
 			sb.append("Main genome contig N/L50:           \t"+cl50+"/"+formatKB(cn50, 3, 0)+"\n");
+			if(printL90){
+				sb.append("Main genome scaffold N/L90:         \t"+ll90+"/"+formatKB(ln90, 3, 0)+"\n");
+				sb.append("Main genome contig N/L90:           \t"+cl90+"/"+formatKB(cn90, 3, 0)+"\n");
+			}
+			if(printExtended){
+				sb.append("Main genome scaffold logsum:        \t"+sLogSumString+"\n");
+				sb.append("Main genome scaffold powersum:      \t"+sPowSumString+"\n");
+			}
+			if(printExtended || printAssemblyScore){
+				sb.append("Main genome assembly score:         \t"+sAssemblyScoreString+"\n");
+			}
 			sb.append("Max scaffold length:                \t"+formatKB(maxScaf, 3, 0)+"\n");
 			sb.append("Max contig length:                  \t"+formatKB(maxContig, 3, 0)+"\n");
 			sb.append("Number of scaffolds > 50 KB:        \t"+numOver50+"\n");
-			sb.append("% main genome in scaffolds > 50 KB: \t"+String.format("%.2f%%", fractionOver50)+"\n");
+			if(printExtended){
+				sb.append("Number of bases in scaffolds>50 KB: \t"+basesOver50+"\n");
+			}
+			
+			sb.append("% main genome in scaffolds > 50 KB: \t"+String.format(Locale.ROOT, "%.2f%%", fractionOver50)+"\n");
 			if(printheadersize){sb.append("Header:\t"+formatKB(HEADERLENSUM, 3, 0)+(HEADERLENSUM<1000 ? " bytes" : ""));}
 			
 			//		System.out.println();
@@ -1198,7 +1437,7 @@ public final class AssemblyStats2 {
 			if(GCFORMAT==0){
 				//Print nothing
 			}else{
-				if(GCFORMAT==1 || GCFORMAT==3 || GCFORMAT==4){
+				if(GCFORMAT==1 || GCFORMAT==3 || GCFORMAT==4 || GCFORMAT==5){
 					tsw.println("A\tC\tG\tT\tN\tIUPAC\tOther\tGC\tGC_stdev");
 				}else{
 					tsw.println("GC\tGC_stdev");
@@ -1223,9 +1462,27 @@ public final class AssemblyStats2 {
 				sb.append("scaf_L50\t");
 				sb.append("ctg_N50\t");
 				sb.append("ctg_L50\t");
+				if(printL90){
+					sb.append("scaf_N90\t");
+					sb.append("scaf_L90\t");
+					sb.append("ctg_N90\t");
+					sb.append("ctg_L90\t");
+				}
+				if(printExtended){
+					sb.append("scaf_logsum\t");
+					sb.append("scaf_powsum\t");
+					sb.append("ctg_logsum\t");
+					sb.append("ctg_powsum\t");
+				}
+				if(printExtended || printAssemblyScore){
+					sb.append("asm_score\t");
+				}
 				sb.append("scaf_max\t");
 				sb.append("ctg_max\t");
 				sb.append("scaf_n_gt50K\t");
+				if(printExtended){
+					sb.append("scaf_l_gt50k\t");
+				}
 				sb.append("scaf_pct_gt50K\t");
 				sb.append("gc_avg\t");
 				sb.append("gc_std");
@@ -1237,21 +1494,73 @@ public final class AssemblyStats2 {
 			sb.append(scaffolds+"\t");
 			sb.append(contigs+"\t");
 			sb.append(scaflen+"\t");
-			sb.append(String.format("%d",contiglen)+"\t");
-			sb.append(String.format("%.3f",(scaflen-contiglen)*100f/scaflen)+"\t");
+			sb.append(String.format(Locale.ROOT, "%d",contiglen)+"\t");
+			sb.append(String.format(Locale.ROOT, "%.3f",(scaflen-contiglen)*100f/scaflen)+"\t");
 			sb.append(ll50+"\t");
 			sb.append(formatKB(ln50, 3, 0)+"\t");
 			sb.append(cl50+"\t");
 			sb.append(formatKB(cn50, 3, 0)+"\t");
+			if(printL90){
+				sb.append(ll90+"\t");
+				sb.append(formatKB(ln90, 3, 0)+"\t");
+				sb.append(cl90+"\t");
+				sb.append(formatKB(cn90, 3, 0)+"\t");
+			}
+			if(printExtended){
+				sb.append(sLogSumString+"\t");
+				sb.append(sPowSumString+"\t");
+				sb.append(cLogSumString+"\t");
+				sb.append(cPowSumString+"\t");
+			}
+			if(printExtended || printAssemblyScore){
+				sb.append(sAssemblyScoreString+"\t");
+			}
 			sb.append(formatKB(maxScaf, 3, 0)+"\t");
 			sb.append(formatKB(maxContig, 3, 0)+"\t");
 			sb.append(numOver50+"\t");
-			sb.append(String.format("%.3f", fractionOver50)+"\t");
-			sb.append(String.format("%.5f", (counts[1]+counts[2])*1.0/(counts[0]+counts[1]+counts[2]+counts[3]))+"\t");
-			sb.append(String.format("%.5f", gc_std));
+			if(printExtended){
+				sb.append(basesOver50+"\t");
+			}
+			sb.append(String.format(Locale.ROOT, "%.3f", fractionOver50)+"\t");
+			sb.append(String.format(Locale.ROOT, "%.5f", (counts[1]+counts[2])*1.0/(counts[0]+counts[1]+counts[2]+counts[3]))+"\t");
+			sb.append(String.format(Locale.ROOT, "%.5f", gc_std));
 			if(addfilename){sb.append('\t').append(name);}
 			
 			tsw.println(sb);
+		}else if(FORMAT==8){//JSON
+			
+			JsonObject jo=new JsonObject();
+			jo.add("scaffolds", scaffolds);
+			jo.add("contigs", contigs);
+			jo.add("scaf_bp", scaflen);
+			jo.add("contig_bp", contiglen);
+			jo.addLiteral("gap_pct", (scaflen-contiglen)*100f/scaflen, 5);
+			jo.add("scaf_N50", ll50);
+			jo.add("scaf_L50", ln50);
+			jo.add("ctg_N50", cl50);
+			jo.add("ctg_L50", cn50);
+
+			jo.add("scaf_N90", ll90);
+			jo.add("scaf_L90", ln90);
+			jo.add("ctg_N90", cl90);
+			jo.add("ctg_L90", cn90);
+
+			jo.addLiteral("scaf_logsum", sLogSumString);
+			jo.addLiteral("scaf_powsum", sPowSumString);
+			jo.addLiteral("ctg_logsum", cLogSumString);
+			jo.addLiteral("ctg_powsum", cPowSumString);
+			jo.addLiteral("asm_score", sAssemblyScoreString);
+			jo.add("scaf_max", maxScaf);
+			jo.add("ctg_max", maxContig);
+			jo.add("scaf_n_gt50K", numOver50);
+			jo.add("scaf_l_gt50k", basesOver50);
+
+			jo.add("scaf_pct_gt50K", fractionOver50);
+			jo.addLiteral("gc_avg", (counts[1]+counts[2])*1.0/(counts[0]+counts[1]+counts[2]+counts[3]), 5);
+			jo.addLiteral("gc_std", gc_std, 5);
+			jo.add("filename", name);
+			
+			tsw.println(jo.toString());
 		}else if(FORMAT==4){
 			
 			if(useheader){
@@ -1264,14 +1573,29 @@ public final class AssemblyStats2 {
 //			sb.append("gap_pct\t");
 			sb.append("scaf_N50\t");
 			sb.append("scaf_L50\t");
+			if(printL90){
+				sb.append("scaf_N90\t");
+				sb.append("scaf_L90\t");
+			}
+			if(printExtended){
+				sb.append("scaf_logsum\t");
+				sb.append("scaf_powsum\t");
+			}
+
+			if(printExtended || printAssemblyScore){
+				sb.append("asm_score\t");
+			}
 //			sb.append("ctg_N50\t");
 //			sb.append("ctg_L50\t");
 			sb.append("scaf_max\t");
 //			sb.append("ctg_max\t");
-			sb.append("scaf_n_gt50K\t");
-			sb.append("scaf_pct_gt50K");
-//			sb.append("gc_avg");
-//			sb.append("gc_std");
+			sb.append("scaf_n_gt50K");
+			if(printExtended){
+				sb.append("\tscaf_l_gt50k");
+			}
+			sb.append("\tscaf_pct_gt50K");
+			sb.append("\tgc_avg");
+			sb.append("\tgc_std");
 			if(addfilename){sb.append("\tfilename");}
 
 			sb.append("\n");
@@ -1280,17 +1604,35 @@ public final class AssemblyStats2 {
 			sb.append(scaffolds+"\t");
 //			sb.append(contigs+"\t");
 			sb.append(scaflen+"\t");
-//			sb.append(String.format("%d",contiglen)+"\t");
-//			sb.append(String.format("%.3f",(scaflen-contiglen)*100f/scaflen)+"\t");
+//			sb.append(String.format(Locale.ROOT, "%d",contiglen)+"\t");
+//			sb.append(String.format(Locale.ROOT, "%.3f",(scaflen-contiglen)*100f/scaflen)+"\t");
 			sb.append(ll50+"\t");
 			sb.append(formatKB(ln50, 3, 0)+"\t");
+			if(printL90){
+				sb.append(ll90+"\t");
+				sb.append(formatKB(ln90, 3, 0)+"\t");
+			}
+			if(printExtended){
+				sb.append(sLogSumString+"\t");
+				sb.append(sPowSumString+"\t");
+			}
+
+			if(printExtended || printAssemblyScore){
+				sb.append(sAssemblyScoreString+"\t");
+			}
 //			sb.append(cl50+"\t");
 //			sb.append(formatKB(cn50, 3, 0)+"\t");
 			sb.append(formatKB(maxScaf, 3, 0)+"\t");
 //			sb.append(formatKB(maxContig, 3, 0)+"\t");
-			sb.append(numOver50+"\t");
-			sb.append(String.format("%.3f", fractionOver50));
-//			sb.append(String.format("%.5f", (counts[1]+counts[2])*1.0/(counts[0]+counts[1]+counts[2]+counts[3])));
+			sb.append(numOver50);
+			if(printExtended){
+				sb.append('\t').append(basesOver50);
+			}
+			sb.append(String.format(Locale.ROOT, "\t%.3f", fractionOver50));
+
+			sb.append(String.format(Locale.ROOT, "\t%.5f", (counts[1]+counts[2])*1.0/(counts[0]+counts[1]+counts[2]+counts[3]))+"\t");
+			sb.append(String.format(Locale.ROOT, "\t%.5f", gc_std));
+			
 			if(addfilename){sb.append('\t').append(name);}
 			tsw.println(sb);
 		}else if(FORMAT==5){
@@ -1306,6 +1648,18 @@ public final class AssemblyStats2 {
 //			sb.append("scaf_L50\t");
 			sb.append("ctg_N50\t");
 			sb.append("ctg_L50\t");
+			if(printL90){
+				sb.append("ctg_N90\t");
+				sb.append("ctg_L90\t");
+			}
+			if(printExtended){				
+				sb.append("ctg_logsum\t");
+				sb.append("ctg_powsum\t");
+			}
+
+			if(printExtended || printAssemblyScore){
+				sb.append("asm_score\t");
+			}
 //			sb.append("scaf_max\t");
 			sb.append("ctg_max\t");
 //			sb.append("scaf_n_gt50K\t");
@@ -1320,33 +1674,50 @@ public final class AssemblyStats2 {
 //			sb.append(scaffolds+"\t");
 			sb.append(contigs+"\t");
 //			sb.append(scaflen+"\t");
-			sb.append(String.format("%d",contiglen)+"\t");
-			sb.append(String.format("%.3f",(scaflen-contiglen)*100f/scaflen)+"\t");
+			sb.append(String.format(Locale.ROOT, "%d",contiglen)+"\t");
+			sb.append(String.format(Locale.ROOT, "%.3f",(scaflen-contiglen)*100f/scaflen)+"\t");
 //			sb.append(ll50+"\t");
 //			sb.append(formatKB(ln50, 3, 0)+"\t");
 			sb.append(cl50+"\t");
 			sb.append(formatKB(cn50, 3, 0)+"\t");
+			if(printL90){
+				sb.append(cl90+"\t");
+				sb.append(formatKB(cn90, 3, 0)+"\t");
+			}
+			if(printExtended){
+				sb.append(cLogSumString+"\t");
+				sb.append(cPowSumString+"\t");
+			}
+			if(printExtended || printAssemblyScore){
+				sb.append(sAssemblyScoreString+"\t");
+			}
 //			sb.append(formatKB(maxScaf, 3, 0)+"\t");
 			sb.append(formatKB(maxContig, 3, 0)+"\t");
 //			sb.append(numOver50+"\t");
-//			sb.append(String.format("%.3f", fractionOver50)+"\t");
-			sb.append(String.format("%.5f", (counts[1]+counts[2])*1.0/(counts[0]+counts[1]+counts[2]+counts[3]))+"\t");
-			sb.append(String.format("%.5f", gc_std));
+//			sb.append(String.format(Locale.ROOT, "%.3f", fractionOver50)+"\t");
+			sb.append(String.format(Locale.ROOT, "%.5f", (counts[1]+counts[2])*1.0/(counts[0]+counts[1]+counts[2]+counts[3]))+"\t");
+			sb.append(String.format(Locale.ROOT, "%.5f", gc_std));
 			if(addfilename){sb.append('\t').append(name);}
 			tsw.println(sb);
 		}else if(FORMAT==7){
 
 			if(addfilename){sb.append("Filename:                           \t"+name+"\n");}
 			sb.append("Main genome contig N/L50:           \t"+cl50+"/"+formatKB(cn50, 3, 0)+"\n");
+			if(printL90){
+				sb.append("Main genome contig N/L90:           \t"+cl90+"/"+formatKB(cn90, 3, 0)+"\n");
+			}
+			if(printExtended){
+//				sb.append("Main genome contig logsum:          \t"+cLogSumString+"\n");
+			}
 			sb.append("Max contig length:                  \t"+formatKB(maxContig, 3, 0)+"\n");
 			sb.append("Number of contigs > 1 KB:           \t"+numOver50+"\n");
-			sb.append("% main genome in contigs > 1 KB:    \t"+String.format("%.2f%%", fractionOver50)+"\n");
+			sb.append("% main genome in contigs > 1 KB:    \t"+String.format(Locale.ROOT, "%.2f%%", fractionOver50)+"\n");
 			if(printheadersize){sb.append("Header:\t"+formatKB(HEADERLENSUM, 3, 0)+(HEADERLENSUM<1000 ? " bytes" : ""));}
 			
 			if(GCFORMAT==0){
 				//Print nothing
 			}else{
-				if(GCFORMAT==1 || GCFORMAT==3 || GCFORMAT==4){
+				if(GCFORMAT==1 || GCFORMAT==3 || GCFORMAT==4 || GCFORMAT==5){
 					tsw.println("A\tC\tG\tT\tGC\tGC_stdev");
 				}else{
 					tsw.println("GC\tGC_stdev");
@@ -1360,21 +1731,21 @@ public final class AssemblyStats2 {
 		tsw.poisonAndWait();
 		
 		if(showspeed){
-			if(!printheadersize){System.err.println("Header:\t"+formatKB(HEADERLENSUM, 3, 0)+(HEADERLENSUM<1000 ? " bytes" : ""));}
-			System.err.println("Time: \t"+t);
+			if(!printheadersize){outstream.println("Header:\t"+formatKB(HEADERLENSUM, 3, 0)+(HEADERLENSUM<1000 ? " bytes" : ""));}
+			outstream.println("Time: \t"+t);
 			long bytes=new File(in).length();
 			if(bytes<1){bytes=LIMSUM;}
 			double mbps=bytes*1000d/t.elapsed;
 			double mbpps=Tools.sum(counts)*1000d/t.elapsed;
-			System.err.println(String.format("Speed:\t%.2f MBytes/s",mbps));
-			System.err.println(String.format("      \t%.2f MBases/s",mbpps));
+			outstream.println(String.format(Locale.ROOT, "Speed:\t%.2f MBytes/s",mbps));
+			outstream.println(String.format(Locale.ROOT, "      \t%.2f MBases/s",mbpps));
 		}
 		
 		if(bbmapkmer>0){
-			System.err.println("BBMap minimum memory estimate at k="+bbmapkmer+":     "+estimateBBMapMemory(counts, scaffolds, HEADERLENSUM, bbmapkmer));
+			outstream.println("BBMap minimum memory estimate at k="+bbmapkmer+":     "+estimateBBMapMemory(counts, scaffolds, HEADERLENSUM, bbmapkmer));
 		}
 		
-		
+		MetadataWriter.write(null, scaffolds, scaflen, 0, 0, false);
 	}
 	
 	private static long bbmapMemoryBytes(long[] acgtn, long scaffolds,
@@ -1499,7 +1870,7 @@ public final class AssemblyStats2 {
 	}
 	
 	private static String toString2(StringBuilder sb, long[] counts){
-		final long a=counts[0], c=counts[1], g=counts[2], t=counts[3], iupac=counts[4], n=counts[5], other=counts[6], control=counts[7]; 
+		final long a=counts[0], c=counts[1], g=counts[2], t=counts[3], iupac=counts[4], n=counts[5], other=counts[6], control=counts[7];
 		long sumDef=a+c+g+t;
 		long sumAll=sumDef+iupac+n+other;
 		double invDef=1.0/sumDef, invAll=1.0/sumAll;
@@ -1508,22 +1879,24 @@ public final class AssemblyStats2 {
 		if(iupac>0 && iupacD<0.0001){iupacD=0.0001;}
 		if(other>0 && otherD<0.0001){otherD=0.0001;}
 		if(GCFORMAT==0 || GCFORMAT==1){
-			return sb.append(String.format("\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n", 
+			return sb.append(String.format(Locale.ROOT, "\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n",
 					sumAll, a*invDef, c*invDef, g*invDef, t*invDef, n*invAll, iupacD, otherD, (g+c)*invDef)).toString();
 		}else if(GCFORMAT==2){
-			return sb.append(String.format("\t%.4f\n", (g+c)*invDef)).toString();
+			return sb.append(String.format(Locale.ROOT, "\t%.4f\n", (g+c)*invDef)).toString();
 		}else if(GCFORMAT==3){
-			return sb.append(String.format("\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n", 
+			return sb.append(String.format(Locale.ROOT, "\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n",
 					sumAll, a*invDef, c*invDef, g*invDef, t*invDef, n*invAll, iupacD, otherD, (g+c)*invDef)).toString();
 		}else if(GCFORMAT==4){
-			return sb.append(String.format("\t%d\t%.4f\n", sumAll, (g+c)*invDef)).toString();
+			return sb.append(String.format(Locale.ROOT, "\t%d\t%.4f\n", sumAll, (g+c)*invDef)).toString();
+		}else if(GCFORMAT==5){
+			return sb.append(String.format(Locale.ROOT, "\t%d\t%.4f\t%.2f\t%.2f\n", sumAll, (g+c)*invDef, logsum(sumAll), powersum(sumAll))).toString();
 		}else{
 			throw new RuntimeException("Unknown format.");
 		}
 	}
 	
 	private static String toString3(StringBuilder sb, long[] counts, double gc_std){
-		final long a=counts[0], c=counts[1], g=counts[2], t=counts[3], iupac=counts[4], n=counts[5], other=counts[6], control=counts[7]; 
+		final long a=counts[0], c=counts[1], g=counts[2], t=counts[3], iupac=counts[4], n=counts[5], other=counts[6], control=counts[7];
 		long sumDef=a+c+g+t;
 		long sumAll=sumDef+iupac+n+other;
 		double invDef=1.0/sumDef, invAll=1.0/sumAll;
@@ -1532,13 +1905,13 @@ public final class AssemblyStats2 {
 		if(iupac>0 && iupacD<0.0001){iupacD=0.0001;}
 		if(other>0 && otherD<0.0001){otherD=0.0001;}
 		if(FORMAT==7){
-			return sb.append(String.format("%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n", 
+			return sb.append(String.format(Locale.ROOT, "%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n",
 					a*invDef, c*invDef, g*invDef, t*invDef, (g+c)*invDef, gc_std)).toString();
-		}else if(GCFORMAT==0 || GCFORMAT==1 || GCFORMAT==3 || GCFORMAT==4){
-			return sb.append(String.format("%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n", 
+		}else if(GCFORMAT==0 || GCFORMAT==1 || GCFORMAT==3 || GCFORMAT==4 || GCFORMAT==5){
+			return sb.append(String.format(Locale.ROOT, "%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n",
 					a*invDef, c*invDef, g*invDef, t*invDef, n*invAll, iupacD, otherD, (g+c)*invDef, gc_std)).toString();
 		}else if(GCFORMAT==2){
-			return sb.append(String.format("%.4f\t%.4f\n", (g+c)*invDef, gc_std)).toString();
+			return sb.append(String.format(Locale.ROOT, "%.4f\t%.4f\n", (g+c)*invDef, gc_std)).toString();
 		}else{
 			throw new RuntimeException("Unknown format.");
 		}
@@ -1568,11 +1941,11 @@ public final class AssemblyStats2 {
 		if(FORMAT>=2 || x<1000){
 			s=Long.toString(x);
 		}else if(x<1000000){
-			s=String.format("%."+precision+"f",x/1000f);
+			s=String.format(Locale.ROOT, "%."+precision+"f",x/1000f);
 			while(s.contains(".") && (s.endsWith("0") || s.endsWith("."))){s=s.substring(0, s.length()-1);}
 			s=s+" KB";
 		}else{
-			s=String.format("%."+precision+"f",x/1000000f);
+			s=String.format(Locale.ROOT, "%."+precision+"f",x/1000000f);
 			while(s.contains(".") && (s.endsWith("0") || s.endsWith("."))){s=s.substring(0, s.length()-1);}
 			s=s+" MB";
 		}
@@ -1587,11 +1960,11 @@ public final class AssemblyStats2 {
 		else if(FORMAT>=2 || x<1000){
 			s=Long.toString(x);
 		}else if(x<1000000){
-			s=String.format("%."+precision+"f",x/1000f);
+			s=String.format(Locale.ROOT, "%."+precision+"f",x/1000f);
 			while(s.contains(".") && (s.endsWith("0") || s.endsWith("."))){s=s.substring(0, s.length()-1);}
 			s=s+" KB";
 		}else{
-			s=String.format("%."+precision+"f",x/1000000f);
+			s=String.format(Locale.ROOT, "%."+precision+"f",x/1000000f);
 			while(s.contains(".") && (s.endsWith("0") || s.endsWith("."))){s=s.substring(0, s.length()-1);}
 			s=s+" MB";
 		}
@@ -1624,7 +1997,7 @@ public final class AssemblyStats2 {
 	}
 	
 	private static final String formatPercent(float x){
-		String s=String.format("%.2f%%", x);
+		String s=String.format(Locale.ROOT, "%.2f%%", x);
 		while(s.length()<8){s=" "+s;}
 		return s;
 	}
@@ -1662,7 +2035,7 @@ public final class AssemblyStats2 {
 	}
 	
 	/**
-	 * @return
+	 * @return charToNum array
 	 */
 	public static final byte[] makeCharToNum() {
 		byte[] r=new byte[256];
@@ -1676,7 +2049,7 @@ public final class AssemblyStats2 {
 		r['x']=r['X']=4;
 		for(byte b : AminoAcid.degenerateBases){
 			if(b!=' '){
-				r[b]=r[Character.toLowerCase(b)]=4;
+				r[b]=r[Tools.toLowerCase(b)]=4;
 			}
 		}
 		r['\n']=r['\r']=r['>']=r['@']=r['+']=7;
@@ -1698,12 +2071,24 @@ public final class AssemblyStats2 {
 	public static boolean append=false;
 	public static boolean useheader=true;
 	public static boolean addfilename=false;
+	public static boolean printL90=true;
+	public static boolean printExtended=false;
+	public static int logSumOffset=1000;
+	public static double powSumPower=0.25;
+	public static double logSumBase=2;
+	public static boolean squareLog=false;
+	public static double logPower=1.0;
 	public static boolean showspeed=false;//true;
 	public static boolean printheadersize=false;
 	public static boolean skipDuplicateLines=true;
 	public static boolean N_UNDERSCORE=true;
 
-	private final static byte slashr='\r', slashn='\n', carrot='>', at='@', noref='N', noref2='n';
+	public static long assemblyScoreMinLen=2000;
+	public static long assemblyScoreMaxLen=50000;
+	public static double alignedFraction=0;
+	public static boolean printAssemblyScore=false;
+
+	private static final byte slashr='\r', slashn='\n', carrot='>', at='@', noref='N', noref2='n';
 	
 	/*--------------------------------------------------------------*/
 	
@@ -1714,10 +2099,10 @@ public final class AssemblyStats2 {
 	/** Number of decimal places for GC histogram */
 	private final int gchistDecimals1;
 	
-	/** Number of bins for output (subsampled) GC content histogram */ 
+	/** Number of bins for output (subsampled) GC content histogram */
 	private final int gcbins;
 	
-	/** Number of bins for internal GC content histogram */ 
+	/** Number of bins for internal GC content histogram */
 	private final int gcbins2;
 	
 	/** Minimum scaffold length to count */
@@ -1758,11 +2143,15 @@ public final class AssemblyStats2 {
 	
 	/** gc standard deviation, using base counts rather than scaffold counts */
 	private double gc_bb_std;
-	
+
+	public static double lastLogSum;
+	public static long lastL90;
 	public static long lastL50;
 	public static long lastSize;
 	public static long lastContigs;
 	public static long lastMaxContig;
+	
+	public static PrintStream outstream=System.out;
 	
 	/*--------------------------------------------------------------*/
 	
@@ -1781,14 +2170,22 @@ public final class AssemblyStats2 {
 			return (int)(contiglen-o.contiglen);
 		}
 		
+		@Override
 		public boolean equals(Object o){return equals((Triple)o);}
 		
 		public boolean equals(Triple o){
 			return length==o.length && contiglen==o.contiglen;
 		}
 		
-		public String toString(){return length+","+contigs+","+contiglen;}
+		@Override
+		public int hashCode() {
+			assert(false) : "This class should not be hashed.";
+			return super.hashCode();
+		}
 		
+		@Override
+		public String toString(){return length+","+contigs+","+contiglen;}
+
 		public final long length;
 		public final long contigs;
 		public final long contiglen;

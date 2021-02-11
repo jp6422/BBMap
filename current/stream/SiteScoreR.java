@@ -1,10 +1,13 @@
 package stream;
 
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+
+import shared.Shared;
 
 
 
@@ -52,8 +55,15 @@ public final class SiteScoreR implements Comparable<SiteScoreR>{
 		return x;
 	}
 	
+	@Override
 	public boolean equals(Object other){
 		return compareTo((SiteScoreR)other)==0;
+	}
+	
+	@Override
+	public int hashCode() {
+		assert(false) : "This class should not be hashed.";
+		return super.hashCode();
 	}
 	
 	public boolean equals(SiteScore other){
@@ -68,6 +78,7 @@ public final class SiteScoreR implements Comparable<SiteScoreR>{
 		return compareTo(other)==0;
 	}
 	
+	@Override
 	public String toString(){
 //		StringBuilder sb=new StringBuilder();
 //		sb.append('\t');
@@ -80,7 +91,7 @@ public final class SiteScoreR implements Comparable<SiteScoreR>{
 //		sb.append(quickScore);
 //		sb.append('\t');
 //		sb.append(score);
-//		
+//
 //		return "chr"+chrom+"\t"+Gene.strandCodes[strand]+sb;
 		return toText().toString();
 	}
@@ -121,7 +132,7 @@ public final class SiteScoreR implements Comparable<SiteScoreR>{
 	}
 	private static boolean overlap(int a1, int b1, int a2, int b2){
 		assert(a1<=b1 && a2<=b2) : a1+", "+b1+", "+a2+", "+b2;
-		return a2<=b1 && b2>=a1; 
+		return a2<=b1 && b2>=a1;
 	}
 	
 	public static String header() {
@@ -248,9 +259,9 @@ public final class SiteScoreR implements Comparable<SiteScoreR>{
 			return 0;
 		}
 		
-		public void sort(List<SiteScoreR> list){
+		public void sort(ArrayList<SiteScoreR> list){
 			if(list==null || list.size()<2){return;}
-			Collections.sort(list, this);
+			Shared.sort(list, this);
 		}
 		
 		public void sort(SiteScoreR[] list){

@@ -1,19 +1,16 @@
 package stream;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 
-import align2.Shared;
-import align2.Tools;
-
 import dna.Gene;
-import dna.Timer;
-
 import fileIO.FileFormat;
 import fileIO.ReadWrite;
-import structures.ListNum;
+import shared.KillSwitch;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 
 /**
  * @author Brian Bushnell
@@ -32,49 +29,24 @@ public class FastaReadInputStream extends ReadInputStream {
 		if(TARGET_READ_LEN<1){
 			TARGET_READ_LEN=Integer.MAX_VALUE;
 			SPLIT_READS=false;
+		}else{
+			SPLIT_READS=true;
 		}
 		
 		Timer t=new Timer();
 		
-		FastaReadInputStream fris=new FastaReadInputStream(args[0], false, false, false, Shared.READ_BUFFER_MAX_DATA);
+		FastaReadInputStream fris=new FastaReadInputStream(args[0], false, false, false, Shared.bufferData());
 		Read r=fris.next();
 		int i=0;
 		
 		while(r!=null){
-			if(i<a){System.out.println(r.toText(false));}
+			if(i<a){System.out.println("'"+r.toText(false)+"'");}
 			r=fris.next();
 			if(++i>=a){break;}
 		}
 		while(r!=null && i++<b){r=fris.next();}
 		t.stop();
 		System.out.println("Time: \t"+t);
-	}
-	
-	public static ArrayList<Read> toReads(String fname){
-		if(fname==null){return null;}
-		ArrayList<Read> list=new ArrayList<Read>();
-
-		/* Start an input stream */
-		FileFormat ff=FileFormat.testInput(fname, FileFormat.FASTA, null, false, true);
-		ConcurrentReadInputStream cris=ConcurrentReadInputStream.getReadInputStream(-1L, false, ff, null);
-		cris.start(); //4567
-		ListNum<Read> ln=cris.nextList();
-		ArrayList<Read> reads=(ln!=null ? ln.list : null);
-
-		/* Iterate through read lists from the input stream */
-		while(reads!=null && reads.size()>0){
-			list.addAll(reads);
-			
-			/* Dispose of the old list and fetch a new one */
-			cris.returnList(ln.id, ln.list.isEmpty());
-			ln=cris.nextList();
-			reads=(ln!=null ? ln.list : null);
-		}
-		/* Cleanup */
-		cris.returnList(ln.id, ln.list.isEmpty());
-//		errorState|=ReadWrite.closeStream(cris);
-		
-		return list;
 	}
 	
 	public FastaReadInputStream(String fname, boolean interleaved_, boolean amino_, boolean allowSubprocess_, long maxdata){
@@ -94,7 +66,7 @@ public class FastaReadInputStream extends ReadInputStream {
 		allowSubprocess=ff.allowSubprocess();
 		minLen=MIN_READ_LEN;
 		maxLen=(SPLIT_READS ? (TARGET_READ_LEN>0 ? TARGET_READ_LEN : Integer.MAX_VALUE) : Integer.MAX_VALUE);
-		MAX_DATA=maxdata>0 ? maxdata : Shared.READ_BUFFER_MAX_DATA;
+		MAX_DATA=maxdata>0 ? maxdata : Shared.bufferData();
 		
 		ins=open();
 		
@@ -165,20 +137,22 @@ public class FastaReadInputStream extends ReadInputStream {
 	
 	@Override
 	public final boolean close(){
-		if(!open){return false;}
-		open=false;
-		assert(ins!=null);
-		
-		try {
-			if(ins!=System.in){
-				errorState|=ReadWrite.finishReading(ins, name, allowSubprocess);
+		synchronized(this){
+			if(!open){return false;}
+			open=false;
+			assert(ins!=null);
+
+			try {
+				if(ins!=System.in){
+					errorState|=ReadWrite.finishReading(ins, name, allowSubprocess);
+				}
+			} catch (Exception e) {
+				System.err.println("Some error occured: "+e);
+				errorState=true;
 			}
-		} catch (Exception e) {
-			System.err.println("Some error occured: "+e);
-			errorState=true;
+
+			ins=null;
 		}
-		
-		ins=null;
 		return false;
 	}
 	
@@ -233,7 +207,10 @@ public class FastaReadInputStream extends ReadInputStream {
 			header=nextHeader();
 			currentSection=0;
 		}
-		assert(header!=null);
+		if(header==null){
+			close();
+			return null;
+		}
 		byte[] bases=nextBases();
 		
 		currentSection++;
@@ -260,7 +237,8 @@ public class FastaReadInputStream extends ReadInputStream {
 //		assert(false) : FORCE_SECTION_NAME+", "+(currentSection==1)+", "+(bases.length<=maxLen)+", "+bases.length+", "+maxLen;
 		assert(currentSection==1 || bases.length>0) : "id="+hd+", section="+currentSection+", len="+bases.length+"\n"+new String(bases);
 		Read r=null;
-		if(FASTQ.PARSE_CUSTOM){
+		if(FASTQ.PARSE_CUSTOM){//TODO: This appears to be legacy code from old custom header format, which won't work anymore
+			assert(false) : "TODO - this code for parsing custom headers of fasta files is obsolete.";
 			if(header!=null && header.indexOf('_')>0){
 				String temp=header;
 				if(temp.endsWith(" /1") || temp.endsWith(" /2")){temp=temp.substring(0, temp.length()-3);}
@@ -273,7 +251,7 @@ public class FastaReadInputStream extends ReadInputStream {
 						int trueLoc=Integer.parseInt(answer[3]);
 						int trueStop=Integer.parseInt(answer[4]);
 //						r=new Read(bases, trueChrom, trueStrand, trueLoc, trueStop, hd, quals, nextReadID);
-						r=new Read(bases, trueChrom, trueLoc, trueStop, hd, quals, nextReadID, (flag|trueStrand));
+						r=new Read(bases, quals, hd, nextReadID, (flag|trueStrand), trueChrom, trueLoc, trueStop);
 						r.setSynthetic(true);
 					} catch (NumberFormatException e) {
 						FASTQ.PARSE_CUSTOM=false;
@@ -289,8 +267,7 @@ public class FastaReadInputStream extends ReadInputStream {
 			}
 		}
 		if(r==null){
-//			r=new Read(bases, (byte)0, (byte)0, 0, 0, hd, quals, nextReadID);
-			r=new Read(bases, -1, -1, -1, hd, quals, nextReadID, flag);
+			r=new Read(bases, quals, hd, nextReadID, flag);
 		}
 		r.setPairnum(pairnum);
 		if(verbose){System.err.println("Made read:\t"+(r.length()>1000 ? r.id : r.toString()));}
@@ -299,14 +276,14 @@ public class FastaReadInputStream extends ReadInputStream {
 	
 	private String nextHeader(){
 		if(verbose){System.err.println("Called nextHeader(); bstart="+bstart+"; bstop="+bstop);}
-		assert(bstart>=bstop || buffer[bstart]=='>' || buffer[bstart]<=slashr) : bstart+", "+bstop+", '"+(char)buffer[bstart]+"'";
+		assert(bstart>=bstop || buffer[bstart]=='>' || buffer[bstart]<=slashr) : bstart+", "+bstop+", '"+(char)buffer[bstart]+"'"+"\t"+name;
 		while(bstart<bstop && buffer[bstart]!='>'){bstart++;}
 		int x=bstart;
 		assert(bstart>=bstop || buffer[x]=='>') : bstart+", "+bstop+", '"+(char)buffer[x]+"'";
 		while(x<bstop && buffer[x]>slashr){x++;}
 		if(verbose){System.err.println("A: x="+x);}
-		if(x<bstop && (buffer[x]<0x2 || buffer[x]==tab)){ //Handle deprecated 'SOH' symbol and tab
-			while(x<bstop && (buffer[x]>slashr || buffer[x]<0x2 || buffer[x]==tab)){
+		if(x<bstop && (buffer[x]<=STX || buffer[x]==tab)){ //Handle deprecated 'SOH' symbol and tab
+			while(x<bstop && (buffer[x]>slashr || buffer[x]<=STX || buffer[x]==tab)){
 				if(buffer[x]==0x1){buffer[x]=carrot;}
 				x++;
 			}
@@ -324,8 +301,8 @@ public class FastaReadInputStream extends ReadInputStream {
 				(buffer[x]=='@' ? "If this is a fastq file, please rename it with a '.fastq' extension.\n" : "")+
 					bstart+", "+bstop+", "+(int)buffer[x]+", "+(char)buffer[x]; //Note: This assertion will fire if a fasta file starts with a newline.
 			while(x<bstop && buffer[x]>slashr){x++;}
-			if(x<bstop && (buffer[x]<0x2 || buffer[x]==tab)){ //Handle deprecated 'SOH' symbol and tab
-				while(x<bstop && (buffer[x]>slashr || buffer[x]<0x2 || buffer[x]==tab)){
+			if(x<bstop && (buffer[x]<=STX || buffer[x]==tab)){ //Handle deprecated 'SOH' symbol and tab
+				while(x<bstop && (buffer[x]>slashr || buffer[x]<=STX || buffer[x]==tab)){
 					if(buffer[x]==0x1){buffer[x]=carrot;}
 					x++;
 				}
@@ -343,7 +320,7 @@ public class FastaReadInputStream extends ReadInputStream {
 				}
 			}
 		}
-
+		
 		String s=stop>start ? new String(buffer, start, stop-start) : "";
 //		String s=new String(buffer, bstart+1, x-(bstart+1));
 		if(verbose){System.err.println("Fetched header: '"+s+"'");}
@@ -354,7 +331,7 @@ public class FastaReadInputStream extends ReadInputStream {
 	
 	private byte[] nextBases(){
 		if(verbose){System.err.println("Called nextBases()");}
-		assert(open) : "Attempting to read from a closed file.  Current header: "+header;
+//		assert(open) : "Attempting to read from a closed file.  Current header: "+header;
 		if(bstart>=bstop){
 			int bytes=fillBuffer();
 			if(bytes<1 || !open){return null;}
@@ -363,16 +340,10 @@ public class FastaReadInputStream extends ReadInputStream {
 		int bases=0;
 		
 		if(!(x>=bstop || buffer[x]!='>')){
-			if(WARN_IF_NO_SEQUENCE){
-				synchronized(getClass()){
-					System.err.println("Warning: A fasta header with no sequence was encountered.");
-					WARN_IF_NO_SEQUENCE=false;
-				}
-			}
-			assert(!ABORT_IF_NO_SEQUENCE) : "\n<START>"+new String(buffer, 0, Tools.min(x+1, buffer.length))+"<STOP>\n";
+			handleNoSequence(x);
 		}
 		
-//		assert(x>=bstop || buffer[x]!='>') : 
+//		assert(x>=bstop || buffer[x]!='>') :
 //			"A fasta header with no sequence was encountered.  To discard such headers, please re-run with the -da flag.";
 		//"\n<START>"+new String(buffer, 0, Tools.min(x+1, buffer.length))+"<STOP>\n";
 		
@@ -395,7 +366,10 @@ public class FastaReadInputStream extends ReadInputStream {
 		}
 		
 		if(bases<minLen){
-			assert(open) : "Attempting to read from a closed file.  Current header: "+header;
+			
+			if(bases==0){handleNoSequence(x);}
+			
+//			assert(open) : "Attempting to read from a closed file.  Current header: "+header;
 			bstart=x;
 			if(verbose){System.err.println("Fetched "+bases+" bases; returning null.  bstart="+bstart+", bstop="+bstop/*+"\n"+new String(buffer)*/);}
 			return null;
@@ -431,9 +405,22 @@ public class FastaReadInputStream extends ReadInputStream {
 		return r;
 	}
 	
+	private void handleNoSequence(int x){
+		if(currentSection>0){return;}//This section is spuriously entered for reads that are a multiple of the target read length when splitting.
+		if(WARN_IF_NO_SEQUENCE){
+			synchronized(getClass()){
+				if(reportedHeader==header){return;}
+				reportedHeader=header;
+				System.err.println("Warning: A fasta header with no sequence was encountered ("+currentSection+"):\n"+header+"\n");
+				if(WARN_FIRST_TIME_ONLY){WARN_IF_NO_SEQUENCE=false;}
+			}
+		}
+		assert(!ABORT_IF_NO_SEQUENCE) : "\n<START>"+new String(buffer, 0, Tools.min(x+1, buffer.length))+"<STOP>\n";
+	}
+	
 	/** Fills buffer.  Ensures that result will extend to the next caret or EOF.  Returns number of bytes filled. */
 	private final int fillBuffer(){
-		assert(open);
+//		assert(open);
 		if(!open){return 0;}
 		if(verbose){System.err.println("fillBuffer() : bstart="+bstart+", bstop="+bstop);}
 		if(bstart<bstop){ //Shift end bytes to beginning
@@ -458,25 +445,38 @@ public class FastaReadInputStream extends ReadInputStream {
 		int len=bstop;
 		int r=-1;
 		int sum=0;
+		boolean seenNewline=false;
 		while(len==bstop){//hit end of input without encountering a caret
 			if(bstop==buffer.length){
-				buffer=Arrays.copyOf(buffer, buffer.length*2);
+				buffer=KillSwitch.copyOf(buffer, buffer.length*2L);
 				if(verbose){System.err.println("Resized to "+buffer.length);}
 			}
+			if(verbose){System.err.println("A: bstop="+bstop+", len="+len);}
 			try {
+				r=-1;
 				r=ins.read(buffer, bstop, buffer.length-bstop);
-			} catch (IOException e) {e.printStackTrace();}
+			} catch (Exception e) {
+				//e.printStackTrace(); //This can happen sometimes when using a fixed number of reads.
+			}
+			if(verbose){System.err.println("B: r="+r);}
 			//if(verbose){System.err.println("r="+r);}
 			if(r>0){
 				sum+=r;
 				bstop=bstop+r;
-				if(bstop>0 && len==0){len=1;}
-				while(len<bstop && buffer[len]!=carrot){len++;}
+				if(bstop>0 && len==0){len=1;}//Probably to skip the first >
+				
+				while(len<bstop && (buffer[len]!=carrot || !seenNewline)){//I need to see a caret after newline
+					seenNewline|=(buffer[len]=='\n');
+					len++;
+				}
+				if(verbose){System.err.println("C: bstop="+bstop+", len="+len+", seenNewline="+seenNewline/*+", seenCarrot="+seenCarrot*/);}
 			}else{
 				len=bstop;
+				if(verbose){System.err.println("D: bstop="+bstop+", len="+len);}
 				break;
 			}
 		}
+		if(verbose){System.err.println("E: bstop="+bstop+", len="+len+", r="+r);}
 		
 		//Skip ';'-delimited comments
 		if(header==null && bstop>bstart && buffer[bstart]==';'){
@@ -485,7 +485,7 @@ public class FastaReadInputStream extends ReadInputStream {
 			assert(nextReadID==0);
 			assert(bstart==0);
 			while(bstop>bstart && buffer[bstart]==';'){
-				while(bstop>bstart && (buffer[bstart]>slashr || buffer[bstart]<0x2 || buffer[bstart]==tab)){bstart++;}
+				while(bstop>bstart && (buffer[bstart]>slashr || buffer[bstart]<=STX || buffer[bstart]==tab)){bstart++;}
 				while(bstop>bstart && buffer[bstart]<=slashr){bstart++;}
 			}
 			if(bstart>=bstop){ //Overflowed buffer with comments; recur
@@ -513,6 +513,8 @@ public class FastaReadInputStream extends ReadInputStream {
 	
 	public boolean isOpen(){return open;}
 	
+	/** Validate fasta settings for auto-shredding input.
+	 * This is kind of obsolete legacy code for BBMap. */
 	public static final boolean settingsOK(){
 		if(MIN_READ_LEN>=Integer.MAX_VALUE-1){
 			throw new RuntimeException("Minimum FASTA read length is too long: "+MIN_READ_LEN);
@@ -537,9 +539,10 @@ public class FastaReadInputStream extends ReadInputStream {
 	
 	private ArrayList<Read> currentList=null;
 	private String header=null;
+	
+	private String reportedHeader=null;
 
 	private boolean open=false;
-//	private boolean hitmax=false; //Indicates that the current 'read' has more pieces to come 
 	private byte[] buffer=new byte[16384];
 	private int bstart=0, bstop=0;
 	public InputStream ins;
@@ -553,20 +556,21 @@ public class FastaReadInputStream extends ReadInputStream {
 	public final boolean interleaved;
 	public final boolean amino;
 	public final int flag;
-	private final int BUF_LEN=Shared.READ_BUFFER_LENGTH;
+	private final int BUF_LEN=Shared.bufferLen();
 	private final long MAX_DATA;
 	private final int maxLen, minLen;
 	
 	
 	public static boolean verbose=false;
-	private final static byte slashr='\r', slashn='\n', carrot='>', space=' ', tab='\t';
+	private static final byte slashr='\r', slashn='\n', carrot='>', space=' ', tab='\t', SOH=0x1, STX=0x2;
 	
 	public static boolean SPLIT_READS=false;
 	public static int TARGET_READ_LEN=500;
-	public static int MIN_READ_LEN=1;//40;
+	public static int MIN_READ_LEN=1;
 	public static boolean FAKE_QUALITY=false;
 	public static boolean FORCE_SECTION_NAME=false;
 	public static boolean WARN_IF_NO_SEQUENCE=true;
+	public static boolean WARN_FIRST_TIME_ONLY=true;
 	public static boolean ABORT_IF_NO_SEQUENCE=false;
 	
 }

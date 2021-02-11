@@ -1,20 +1,18 @@
 package driver;
 
-import java.io.File;
 import java.io.PrintStream;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 
-import dna.Parser;
-import dna.Timer;
-import fileIO.ReadWrite;
 import fileIO.FileFormat;
+import fileIO.ReadWrite;
 import fileIO.TextFile;
 import fileIO.TextStreamWriter;
-
-import align2.Shared;
-import align2.Tools;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.Shared;
+import shared.Timer;
 
 /**
  * Filters text lines by exact match or substring.
@@ -26,26 +24,24 @@ public class CountSharedLines {
 
 	public static void main(String[] args){
 		Timer t=new Timer();
-		CountSharedLines mb=new CountSharedLines(args);
-		mb.process(t);
+		CountSharedLines x=new CountSharedLines(args);
+		x.process(t);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(x.outstream);
 	}
 	
 	public CountSharedLines(String[] args){
 		
-		args=Parser.parseConfig(args);
-		if(Parser.parseHelp(args, true)){
-			printOptions();
-			System.exit(0);
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
 		}
 		
-		for(String s : args){if(s.startsWith("out=standardout") || s.startsWith("out=stdout")){outstream=System.err;}}
-		outstream.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
-		
-		Shared.READ_BUFFER_LENGTH=Tools.min(200, Shared.READ_BUFFER_LENGTH);
 		Shared.capBuffers(4);
 		ReadWrite.USE_PIGZ=ReadWrite.USE_UNPIGZ=true;
 		ReadWrite.MAX_ZIP_THREADS=Shared.threads();
-		
 		
 		Parser parser=new Parser();
 		for(int i=0; i<args.length; i++){
@@ -53,8 +49,6 @@ public class CountSharedLines {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if(b==null || b.equalsIgnoreCase("null")){b=null;}
-			while(a.startsWith("-")){a=a.substring(1);} //In case people use hyphens
 
 			if(parser.parseCommon(arg, a, b)){
 				//do nothing
@@ -73,10 +67,10 @@ public class CountSharedLines {
 					}
 				}
 			}else if(a.equals("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 				ReadWrite.verbose=verbose;
 			}else if(a.equals("lines") || a.equals("maxlines")){
-				maxLines=Tools.parseKMG(b);
+				maxLines=Parse.parseKMG(b);
 			}else if(a.equals("substrings") || a.equals("substring")){
 				if(b==null){b="t";}
 				if(b.equals("header")){
@@ -84,21 +78,22 @@ public class CountSharedLines {
 				}else if(b.equals("name")){
 					nameSubstringOfLine=true;
 				}else{
-					nameSubstringOfLine=lineSubstringOfName=Tools.parseBoolean(b);
+					nameSubstringOfLine=lineSubstringOfName=Parse.parseBoolean(b);
 				}
 			}else if(a.equals("prefix") || a.equals("prefixmode")){
-				prefixMode=Tools.parseBoolean(b);
+				prefixMode=Parse.parseBoolean(b);
 			}else if(a.equals("replace")){
+				assert(b!=null) : "Bad parameter: "+arg;
 				String[] split2=b.split(",");
 				assert(split2.length==2);
 				replace1=split2[0];
 				replace2=split2[1];
 			}else if(a.equals("casesensitive") || a.equals("case")){
-				ignoreCase=!Tools.parseBoolean(b);
+				ignoreCase=!Parse.parseBoolean(b);
 			}else if(a.equals("include") || a.equals("retain")){
-				exclude=!Tools.parseBoolean(b);
+				exclude=!Parse.parseBoolean(b);
 			}else if(a.equals("exclude") || a.equals("remove")){
-				exclude=Tools.parseBoolean(b);
+				exclude=Parse.parseBoolean(b);
 			}else{
 				outstream.println("Unknown parameter "+args[i]);
 				assert(false) : "Unknown parameter "+args[i];
@@ -124,13 +119,10 @@ public class CountSharedLines {
 			append=parser.append;
 		}
 		
-		if(in1==null || in2==null){
-			printOptions();
-			throw new RuntimeException("Error - at least one input file is required from each set.");
-		}
+		if(in1==null || in2==null){throw new RuntimeException("Error - at least one input file is required from each set.");}
 	}
 	
-	final String getOutputName(String fname){
+	final static String getOutputName(String fname){
 		fname=fname.replaceAll("\\\\", "/");
 		if(!fname.contains("/")){fname="./"+fname;}
 		int idx=fname.lastIndexOf('/');
@@ -211,10 +203,6 @@ public class CountSharedLines {
 	}
 	
 	/*--------------------------------------------------------------*/
-	
-	private void printOptions(){
-		assert(false) : "printOptions: TODO";
-	}
 	
 	
 	/*--------------------------------------------------------------*/

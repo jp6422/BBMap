@@ -4,19 +4,17 @@ import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import dna.Timer;
-
-import ukmer.HashArrayU1D;
-import ukmer.KmerNodeU;
-import ukmer.KmerTableSetU;
-
 import kmer.AbstractKmerTableSet;
 import kmer.HashArray1D;
 import kmer.KmerNode;
 import kmer.KmerTableSet;
+import shared.Timer;
+import ukmer.HashArrayU1D;
+import ukmer.KmerNodeU;
+import ukmer.KmerTableSetU;
 
 /**
- * Removes kmers with counts outside a certain range. 
+ * Removes kmers with counts outside a certain range.
  * @author Brian Bushnell
  * @date Jul 20, 2015
  */
@@ -111,7 +109,7 @@ public abstract class AbstractRemoveThread extends Thread{
 			}
 			
 			table.clearOwnership();
-			kmersRemovedT+=table.regenerate();
+			kmersRemovedT+=table.regenerate(0);
 			return true;
 		}
 		
@@ -155,7 +153,7 @@ public abstract class AbstractRemoveThread extends Thread{
 			}
 			
 			table.clearOwnership();
-			kmersRemovedT+=table.regenerate();
+			kmersRemovedT+=table.regenerate(0);
 			return true;
 		}
 		

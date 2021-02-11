@@ -2,8 +2,8 @@ package cluster;
 
 import java.io.Serializable;
 
+import shared.Tools;
 import stream.Read;
-import align2.Tools;
 
 /**
  * @author Brian Bushnell
@@ -89,7 +89,7 @@ class ReadTag implements Serializable{
 	/** Sorted long kmers */
 	private int[] kmerArray1;
 	
-	/** Canonically-ordered short kmer counts */ 
+	/** Canonically-ordered short kmer counts */
 	private int[] kmerArray2;
 	
 	private float[] kmerFreq2;

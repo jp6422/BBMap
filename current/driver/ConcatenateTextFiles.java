@@ -5,23 +5,27 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.concurrent.ArrayBlockingQueue;
-
-import align2.ReadStats;
-import align2.Tools;
-
-import dna.Parser;
-import dna.Timer;
 
 import fileIO.ReadWrite;
 import fileIO.TextFile;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Timer;
 
 public class ConcatenateTextFiles {
 	
 	/** Format: infile1,infile2,...infileN,outfile */
 	public static void main(String[] args){
-		System.err.println("Executing "+(new Object() { }.getClass().getEnclosingClass().getName())+" "+Arrays.toString(args)+"\n");
+
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
+		
 		Timer t=new Timer();
 		
 		if(ReadWrite.ZIPLEVEL<6){ReadWrite.ZIPLEVEL=6;}
@@ -30,16 +34,14 @@ public class ConcatenateTextFiles {
 			final String arg=args[i];
 			final String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
-			String b=(split.length>1 ? split[1] : "true");
-
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(Parser.parseZip(arg, a, b)){
+			String b=split.length>1 ? split[1] : null;
+			
+			if(Parser.parseZip(arg, a, b)){
 				//do nothing
 			}else if(a.equals("append") || a.equals("app")){
-				append=ReadStats.append=Tools.parseBoolean(b);
+				append=ReadStats.append=Parse.parseBoolean(b);
 			}else if(a.equals("overwrite") || a.equals("ow")){
-				overwrite=Tools.parseBoolean(b);
+				overwrite=Parse.parseBoolean(b);
 			}else{
 				concatenate(args[i].split(","));
 			}
@@ -83,7 +85,7 @@ public class ConcatenateTextFiles {
 		File f=new File(term);
 		if(!f.isDirectory()){
 
-			TextFile tf=new TextFile(term, false, false);
+			TextFile tf=new TextFile(term, false);
 			
 			ArrayList<String> buffer=bufferptr[0];
 			
@@ -176,7 +178,7 @@ public class ConcatenateTextFiles {
 		private final OutputStream os;
 		private final PrintWriter writer;
 		private final ArrayBlockingQueue<ArrayList<String>> queue=new ArrayBlockingQueue<ArrayList<String>>(MAX_LISTS);
-		private final String fname;
+		final String fname;
 		
 	}
 

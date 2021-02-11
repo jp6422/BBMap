@@ -1,8 +1,9 @@
 package jgi;
 
 import dna.AminoAcid;
-import dna.Timer;
+import shared.Timer;
 import stream.Read;
+import template.BBTool_ST;
 
 /**
  * @author Brian Bushnell
@@ -33,7 +34,8 @@ public class RemoveBadBarcodes extends BBTool_ST {
 		super(args);
 	}
 	
-	void setDefaults(){}
+	@Override
+	protected void setDefaults(){}
 	
 	@Override
 	public boolean parseArgument(String arg, String a, String b) {
@@ -41,7 +43,7 @@ public class RemoveBadBarcodes extends BBTool_ST {
 	}
 	
 	@Override
-	boolean processReadPair(Read r1, Read r2) {
+	protected boolean processReadPair(Read r1, Read r2) {
 		String id=r1.id;
 		int loc=(id==null ? -1 : id.lastIndexOf(':'));
 		if(loc<0 || loc>=id.length()-1){
@@ -61,13 +63,16 @@ public class RemoveBadBarcodes extends BBTool_ST {
 	}
 	
 	@Override
-	void startupSubclass() {}
+	protected void startupSubclass() {}
 	
-	@Override
+	protected @Override
 	void shutdownSubclass() {}
 	
 	@Override
-	void showStatsSubclass(Timer t, long readsIn, long basesIn) {
+	protected final boolean useSharedHeader(){return true;}
+	
+	@Override
+	protected void showStatsSubclass(Timer t, long readsIn, long basesIn) {
 		
 		outstream.println();
 		outstream.println("Good:               "+good);

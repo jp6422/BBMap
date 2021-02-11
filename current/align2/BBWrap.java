@@ -2,12 +2,13 @@ package align2;
 
 import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 
-import stream.Read;
 import dna.Data;
-import dna.Parser;
-import dna.Timer;
+import fileIO.TextFile;
+import shared.Parse;
+import shared.PreParser;
+import shared.Shared;
+import stream.Read;
 
 /**
  * @author Brian Bushnell
@@ -20,21 +21,18 @@ public class BBWrap {
 		BBWrap wrapper=new BBWrap();
 		ArrayList<String> list=wrapper.parse(args);
 		wrapper.execute(list);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(outstream);
 	}
 
 	private final ArrayList<String> parse(String[] args){
 
-		sysout.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
-		sysout.println("BBMap version "+Shared.BBMAP_VERSION_STRING);
-		
-		args=Parser.parseConfig(args);
-		if(Parser.parseHelp(args, true)){
-//			printOptions();
-			System.exit(0);
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
 		}
-		sysout.println("BBMap version "+Shared.BBMAP_VERSION_STRING);
-		
-		Timer t=new Timer();
 		
 		Read.TO_UPPER_CASE=true;
 		
@@ -43,8 +41,7 @@ public class BBWrap {
 			final String[] split=arg.split("=");
 			final String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-//			if("null".equalsIgnoreCase(b)){b=null;}
-//			System.err.println("Processing "+arg);
+			
 			if(a.equals("path") || a.equals("root")){
 				Data.setPath(b);
 				args[i]=null;
@@ -60,11 +57,23 @@ public class BBWrap {
 			}else if(a.equals("in2")){
 				add(b, in2List);
 				args[i]=null;
+			}else if(a.equals("inlist") || a.equals("in1list")){
+				addFileContents(b, in1List);
+				args[i]=null;
+			}else if(a.equals("in2list")){
+				addFileContents(b, in2List);
+				args[i]=null;
 			}else if(a.equals("out") || a.equals("out1")){
 				add(b, out1List);
 				args[i]=null;
 			}else if(a.equals("out2")){
 				add(b, out2List);
+				args[i]=null;
+			}else if(a.equals("outlist") || a.equals("out1list")){
+				addFileContents(b, out1List);
+				args[i]=null;
+			}else if(a.equals("out2list")){
+				addFileContents(b, out2List);
 				args[i]=null;
 			}else if(a.equals("outm") || a.equals("outm1") || a.equals("outmapped") || a.equals("outmapped1")){
 				add(b, outm1List);
@@ -77,6 +86,18 @@ public class BBWrap {
 				args[i]=null;
 			}else if(a.equals("outu2") || a.equals("outunmapped2")){
 				add(b, outu2List);
+				args[i]=null;
+			}else if(a.equals("outmlist") || a.equals("outm1list") || a.equals("outmappedlist") || a.equals("outmapped1list")){
+				addFileContents(b, outm1List);
+				args[i]=null;
+			}else if(a.equals("outm2list") || a.equals("outmapped2list")){
+				addFileContents(b, outm2List);
+				args[i]=null;
+			}else if(a.equals("outulist") || a.equals("outu1list") || a.equals("outunmappedlist") || a.equals("outunmapped1list")){
+				addFileContents(b, outu1List);
+				args[i]=null;
+			}else if(a.equals("outu2list") || a.equals("outunmapped2list")){
+				addFileContents(b, outu2List);
 				args[i]=null;
 			}else if(a.equals("outb") || a.equals("outb1") || a.equals("outblack") || a.equals("outblack1") || a.equals("outblacklist") || a.equals("outblacklist1")){
 				add(b, outb1List);
@@ -97,7 +118,7 @@ public class BBWrap {
 				add(b, bsList);
 				args[i]=null;
 			}else if(a.equals("append") || a.equals("app")){
-				append=Tools.parseBoolean(b);
+				append=Parse.parseBoolean(b);
 			}
 		}
 		
@@ -112,9 +133,18 @@ public class BBWrap {
 		
 	}
 	
-	private void add(String s, ArrayList<String> list){
+	private static void add(String s, ArrayList<String> list){
 		if(s!=null && !"null".equals(s.toLowerCase())){
 			String[] sa=s.split(",");
+			for(String ss : sa){
+				list.add(ss);
+			}
+		}
+	}
+	
+	private static void addFileContents(String s, ArrayList<String> list){
+		if(s!=null && !"null".equals(s.toLowerCase())){
+			String[] sa=TextFile.toStringLines(s);
 			for(String ss : sa){
 				list.add(ss);
 			}
@@ -190,6 +220,6 @@ public class BBWrap {
 	
 	private boolean append=false;
 	
-	static PrintStream sysout=System.err;
+	static PrintStream outstream=System.err;
 	
 }

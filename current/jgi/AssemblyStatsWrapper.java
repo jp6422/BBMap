@@ -3,7 +3,7 @@ package jgi;
 import java.io.File;
 import java.util.ArrayList;
 
-import align2.Tools;
+import shared.Tools;
 
 /**
  * @author Brian Bushnell

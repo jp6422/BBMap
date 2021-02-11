@@ -2,12 +2,14 @@ package driver;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Locale;
 
-import align2.Tools;
-
-import dna.Parser;
 import fileIO.TextFile;
 import fileIO.TextStreamWriter;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.Tools;
 
 /**
  * @author Brian Bushnell
@@ -21,13 +23,6 @@ public class SummarizeSealStats {
 	 * @param args Command line arguments
 	 */
 	public static void main(String[] args){
-		
-		args=Parser.parseConfig(args);
-		if(Parser.parseHelp(args, true)){
-			assert(false);
-			System.exit(0);
-		}
-		
 		//Create a new SummarizeSealStats instance
 		SummarizeSealStats sss=new SummarizeSealStats(args);
 		
@@ -36,10 +31,15 @@ public class SummarizeSealStats {
 	}
 	
 	public SummarizeSealStats(String[] args){
-		
-		Parser parser=new Parser();
+
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
 		
 		ArrayList<String> names=new ArrayList<String>();
+		Parser parser=new Parser();
 		
 		/* Parse arguments */
 		for(int i=0; i<args.length; i++){
@@ -48,19 +48,17 @@ public class SummarizeSealStats {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if("null".equalsIgnoreCase(b)){b=null;}
-			while(a.charAt(0)=='-' && (a.indexOf('.')<0 || i>1 || !new File(a).exists())){a=a.substring(1);}
 			
 			if(a.equals("printtotal") || a.equals("pt")){
-				printTotal=Tools.parseBoolean(b);
+				printTotal=Parse.parseBoolean(b);
 			}else if(a.equals("ignoresametaxa")){
-				ignoreSameTaxa=Tools.parseBoolean(b);
+				ignoreSameTaxa=Parse.parseBoolean(b);
 			}else if(a.equals("ignoresamebarcode") || a.equals("ignoresameindex")){
-				ignoreSameBarcode=Tools.parseBoolean(b);
+				ignoreSameBarcode=Parse.parseBoolean(b);
 			}else if(a.equals("ignoresamelocation") || a.equals("ignoresameloc")){
-				ignoreSameLocation=Tools.parseBoolean(b);
+				ignoreSameLocation=Parse.parseBoolean(b);
 			}else if(a.equals("usetotal") || a.equals("totaldenominator") || a.equals("totald") || a.equals("td")){
-				totalDenominator=Tools.parseBoolean(b);
+				totalDenominator=Parse.parseBoolean(b);
 			}else if(parser.parse(arg, a, b)){
 				//do nothing
 			}else if(!arg.contains("=")){
@@ -136,8 +134,9 @@ public class SummarizeSealStats {
 			}
 		}
 		
+		@Override
 		public String toString(){
-			return String.format("%s\t%s\t%d\t%d\t%d\t%d\t%.2f", fname, pname, pcount, ocount, pbases, obases, ppm);
+			return String.format(Locale.ROOT, "%s\t%s\t%d\t%d\t%d\t%d\t%.2f", fname, pname, pcount, ocount, pbases, obases, ppm);
 		}
 		
 		private void summarize(){

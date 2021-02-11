@@ -3,11 +3,13 @@ package jgi;
 import java.util.Arrays;
 import java.util.Comparator;
 
-import align2.Tools;
 import dna.AminoAcid;
-import dna.Timer;
 import fileIO.FileFormat;
+import shared.Parse;
+import shared.Timer;
+import shared.Tools;
 import stream.Read;
+import template.BBTool_ST;
 
 /**
  * @author Brian Bushnell
@@ -28,7 +30,8 @@ public class SmallKmerFrequency extends BBTool_ST {
 		bbt.process(t);
 	}
 	
-	void setDefaults(){
+	@Override
+	protected void setDefaults(){
 		k=2;
 		display=3;
 		addNumbers=false;
@@ -46,10 +49,10 @@ public class SmallKmerFrequency extends BBTool_ST {
 		counts=new int[maxKmer+1];
 		display=Tools.min(display, counts.length);
 		if(out1!=null){
-			ffout1=FileFormat.testOutput(out1, FileFormat.ATTACHMENT, ".info", true, overwrite, append, true);
+			ffout1=FileFormat.testOutput(out1, FileFormat.ATTACHMENT, ".info", true, overwrite, append, false);
 		}
 		kmers=new Kmer[counts.length];
-		for(int i=0; i<kmerIndex.length; i++){ 
+		for(int i=0; i<kmerIndex.length; i++){
 			int index=kmerIndex[i];
 			if(kmers[index]==null){
 				kmers[index]=new Kmer();
@@ -72,18 +75,18 @@ public class SmallKmerFrequency extends BBTool_ST {
 			display=Integer.parseInt(b);
 			return true;
 		}else if(a.equals("addnumbers") || a.equals("number") || a.equals("count") || a.equals("numbers") || a.equals("counts")){
-			addNumbers=Tools.parseBoolean(b);
+			addNumbers=Parse.parseBoolean(b);
 			return true;
 		}
 		return false;
 	}
 	
 	@Override
-	boolean processReadPair(Read r1, Read r2) {
+	protected boolean processReadPair(Read r1, Read r2) {
 		if(r1!=null){
 			makeKmerProfile(r1.bases, counts, true);
 			sb.append(r1.id);
-			Arrays.sort(kmers, numComparator); 
+			Arrays.sort(kmers, numComparator);
 			for(int i=0; i<counts.length; i++){
 				kmers[i].count=counts[i];
 			}
@@ -100,7 +103,7 @@ public class SmallKmerFrequency extends BBTool_ST {
 		if(r2!=null){
 			makeKmerProfile(r2.bases, counts, true);
 			sb.append(r2.id);
-			Arrays.sort(kmers, numComparator); 
+			Arrays.sort(kmers, numComparator);
 			for(int i=0; i<counts.length; i++){
 				kmers[i].count=counts[i];
 			}
@@ -147,13 +150,13 @@ public class SmallKmerFrequency extends BBTool_ST {
 	}
 	
 	@Override
-	void startupSubclass() {}
+	protected void startupSubclass() {}
 	
 	@Override
-	void shutdownSubclass() {}
+	protected void shutdownSubclass() {}
 	
 	@Override
-	void showStatsSubclass(Timer t, long readsIn, long basesIn) {}
+	protected void showStatsSubclass(Timer t, long readsIn, long basesIn) {}
 	
 	private class Kmer{
 		
@@ -161,6 +164,7 @@ public class SmallKmerFrequency extends BBTool_ST {
 		int count=0;
 		int num;
 		
+		@Override
 		public String toString(){return "("+s+","+num+","+count+")";}
 		
 	}
@@ -199,6 +203,9 @@ public class SmallKmerFrequency extends BBTool_ST {
 //		assert(false) : Arrays.toString(array);
 		return array;
 	}
+	
+	@Override
+	protected final boolean useSharedHeader(){return true;}
 
 	private static final NumComparator numComparator=new NumComparator();
 	private static final CountComparator countComparator=new CountComparator();

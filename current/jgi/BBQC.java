@@ -6,19 +6,18 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.TimeZone;
 
-import stream.FASTQ;
-
-import dna.Data;
-import dna.Parser;
-
 import align2.BBMap;
-import align2.ReadStats;
-import align2.Shared;
-import align2.Tools;
-import align2.TrimRead;
+import dna.Data;
 import fileIO.ByteFile1;
 import fileIO.ReadWrite;
 import fileIO.TextStreamWriter;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.Shared;
+import shared.Tools;
+import shared.TrimRead;
+import stream.FASTQ;
 
 /**
  * Wrapper for BBDukF, BBMap, and BBNorm to perform quality-control and artifact removal.
@@ -55,9 +54,11 @@ public class BBQC {
 	 */
 	BBQC(String[] args){
 		
-		//Optional default parameters to match current pipeline
-//		arglist.add("k=22");
-//		arglist.add("maxbadkmers=2");
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
 		
 		//Symbols to insert in output filename to denote operations performed; may be overriden from command line
 		String symbols_=null;//"filtered"
@@ -69,11 +70,8 @@ public class BBQC {
 			String[] split=arg.split("="); //Expect key=value pairs
 			String a=split[0].toLowerCase(); //All keys are converted to lower case
 			String b=split.length>1 ? split[1] : null;
-			while(a.startsWith("-")){a=a.substring(1);} //In case people use hyphens
-
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(Parser.parseZip(arg, a, b)){
+			
+			if(Parser.parseZip(arg, a, b)){
 				if(a.equals("pigz")){
 					pigz=b;
 				}else if(a.equals("unpigz")){
@@ -84,7 +82,7 @@ public class BBQC {
 			}else if(Parser.parseCommonStatic(arg, a, b)){
 				//do nothing
 			}else if(a.equals("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 				ByteFile1.verbose=verbose;
 				stream.FastaReadInputStream.verbose=verbose;
 				primaryArgList.add(arg);
@@ -123,10 +121,8 @@ public class BBQC {
 				artifactFileDna=b;
 			}else if(a.equals("phixref")){
 				phixRef=b;
-			}else if(a.equals("append") || a.equals("app")){
-				append=ReadStats.append=Tools.parseBoolean(b);
 			}else if(a.equals("overwrite") || a.equals("ow")){
-				overwrite=Tools.parseBoolean(b);
+				overwrite=Parse.parseBoolean(b);
 			}else if(a.equals("ml") || a.equals("minlen") || a.equals("minlength")){
 				minLen=Integer.parseInt(b);
 			}else if(a.equals("mlf") || a.equals("minlenfrac") || a.equals("minlenfraction") || a.equals("minlengthfraction")){
@@ -146,13 +142,15 @@ public class BBQC {
 			}else if(a.equals("filelist")){
 				fileListName=b;
 			}else if(a.equals("compress")){
-				compress=Tools.parseBoolean(b);
+				compress=Parse.parseBoolean(b);
 			}else if(a.equals("rna")){
-				rnaFlag=Tools.parseBoolean(b);
+				rnaFlag=Parse.parseBoolean(b);
 			}else if(a.equals("phix")){
-				phixFlag=Tools.parseBoolean(b);
+				phixFlag=Parse.parseBoolean(b);
+			}else if(a.equals("lambda")){
+				lambdaFlag=Parse.parseBoolean(b);
 			}else if(a.equals("pjet")){
-				pjetFlag=Tools.parseBoolean(b);
+				pjetFlag=Parse.parseBoolean(b);
 			}else if(a.equals("ktrim")){
 				ktrim=b;
 			}else if(a.equals("mink")){
@@ -175,6 +173,7 @@ public class BBQC {
 			}else if(a.equals("trimhdist2")){
 				hdist2_trim=Integer.parseInt(b);
 			}else if(a.equals("maq")){
+				assert(b!=null) : "Bad parameter: "+arg;
 				if(b.indexOf(',')>-1){
 					String[] x=b.split(",");
 					assert(x.length==2) : "maq should be length 1 or 2 (at most 1 comma).\nFormat: maq=quality,bases; e.g. maq=10 or maq=10,20";
@@ -188,27 +187,27 @@ public class BBQC {
 			}else if(a.equals("trimq")){
 				trimq=Byte.parseByte(b);
 			}else if(a.equals("human") || a.equals("removehuman")){
-				removehuman=Tools.parseBoolean(b);
+				removehuman=Parse.parseBoolean(b);
 			}else if(a.equals("normalize") || a.equals("norm")){
-				normalize=Tools.parseBoolean(b);
+				normalize=Parse.parseBoolean(b);
 			}else if(a.equals("ecc")){
-				ecc=Tools.parseBoolean(b);
+				ecc=Parse.parseBoolean(b);
 			}else if(a.equals("aec") || a.equals("aecc")){
-				aecc=Tools.parseBoolean(b);
+				aecc=Parse.parseBoolean(b);
 				if(aecc){ecc=true;}
 			}else if(a.equals("cecc")){
-				cecc=Tools.parseBoolean(b);
+				cecc=Parse.parseBoolean(b);
 				if(cecc){ecc=true;}
 			}else if(a.equals("markerrorsonly") || a.equals("meo")){
-				meo=Tools.parseBoolean(b);
+				meo=Parse.parseBoolean(b);
 			}else if(a.equals("tam")){
-				tam=Tools.parseBoolean(b);
+				tam=Parse.parseBoolean(b);
 			}else if(a.equals("taf")){
-				trimAfterFiltering=Tools.parseBoolean(b);
+				trimAfterFiltering=Parse.parseBoolean(b);
 			}else if(a.equals("mue")){
-				mue=Tools.parseBoolean(b);
+				mue=Parse.parseBoolean(b);
 			}else if(a.equals("mw1")){
-				mw1=Tools.parseBoolean(b);
+				mw1=Parse.parseBoolean(b);
 			}else if(a.equals("max") || a.equals("maxdepth")){
 				maxdepth=Integer.parseInt(b);
 			}else if(a.equals("min") || a.equals("mindepth")){
@@ -232,29 +231,31 @@ public class BBQC {
 			}else if(a.equals("hits") || a.equals("minhits")){
 				minhits=Integer.parseInt(b);
 			}else if(a.equals("fast")){
-				fast=Tools.parseBoolean(b);
+				fast=Parse.parseBoolean(b);
 			}else if(a.equals("local")){
-				local=Tools.parseBoolean(b);
+				local=Parse.parseBoolean(b);
 			}else if(a.equals("mappath") || a.equals("indexpath")){
 				indexPath=b;
 			}else if(a.equals("mapref")){
 				mapRef=b;
+			}else if(a.equals("copyundefined") || a.equals("cu")){
+				copyUndefined=Parse.parseBoolean(b);
 			}else if(a.equals("qtrim")){
 				if(b==null){qtrim="rl";}
 				else if(b.equalsIgnoreCase("left") || b.equalsIgnoreCase("l")){qtrim="l";}
 				else if(b.equalsIgnoreCase("right") || b.equalsIgnoreCase("r")){qtrim="r";}
 				else if(b.equalsIgnoreCase("both") || b.equalsIgnoreCase("rl") || b.equalsIgnoreCase("lr")){qtrim="lr";}
-				else if(Character.isDigit(b.charAt(0))){
+				else if(Tools.isDigit(b.charAt(0))){
 					trimq=Byte.parseByte(b);
 					qtrim=(trimq>=0 ? "lr" : "f");
-				}else{qtrim=""+Tools.parseBoolean(b);}
+				}else{qtrim=""+Parse.parseBoolean(b);}
 			}else if(a.equals("optitrim") || a.equals("otf") || a.equals("otm")){
-				if(b!=null && (b.charAt(0)=='.' || Character.isDigit(b.charAt(0)))){
+				if(b!=null && (b.charAt(0)=='.' || Tools.isDigit(b.charAt(0)))){
 					TrimRead.optimalMode=true;
 					TrimRead.optimalBias=Float.parseFloat(b);
 					assert(TrimRead.optimalBias>=0 && TrimRead.optimalBias<1);
 				}else{
-					TrimRead.optimalMode=Tools.parseBoolean(b);
+					TrimRead.optimalMode=Parse.parseBoolean(b);
 				}
 			}else if(a.equals("maxns")){
 				maxNs=Integer.parseInt(b);
@@ -415,11 +416,11 @@ public class BBQC {
 			}
 		}
 		
-		//Write combined stats file (number of reads/bases present/removed in each stage) 
+		//Write combined stats file (number of reads/bases present/removed in each stage)
 		if(rqcStatsName!=null){
 			final TextStreamWriter tsw=new TextStreamWriter(rqcStatsName, overwrite, false, false);
 			tsw.start();
-			tsw.println(BBDukF.rqcString());
+			tsw.println(BBDuk.rqcString());
 			tsw.poisonAndWait();
 		}
 		
@@ -500,6 +501,8 @@ public class BBQC {
 			if(rqcStatsName!=null){argList.add("rqc=hashmap");}
 			if(kmerStatsName!=null){argList.add("outduk="+kmerStatsName_kt);}
 			if(scaffoldStatsName!=null){argList.add("stats="+scaffoldStatsName_kt);}
+			
+			if(copyUndefined){argList.add("cu");}
 		}
 		
 		{//Add BBDuk references
@@ -521,7 +524,7 @@ public class BBQC {
 		String[] dukargs=argList.toArray(new String[0]);
 		
 		{//run BBDuk
-			BBDukF duk=new BBDukF(dukargs);
+			BBDuk duk=new BBDuk(dukargs);
 			try {
 				duk.process();
 			} catch (Exception e) {
@@ -550,7 +553,7 @@ public class BBQC {
 	 * @param qfout2 Secondary output qual file
 	 * @param inPrefix Append this prefix to input filenames
 	 */
-	private void filter(String in1, String in2, String out1, String out2, String qfin1, String qfin2, String qfout1, String qfout2,  
+	private void filter(String in1, String in2, String out1, String out2, String qfin1, String qfin2, String qfout1, String qfout2,
 			String inPrefix, String outPrefix, boolean prependIndir, boolean prependOutdir, boolean lastPhase){
 		
 		log("filter start", true);
@@ -596,9 +599,12 @@ public class BBQC {
 		{//Add BBDuk references
 			filterrefs.add(mainArtifactFile);
 			filterrefs.add(rnaFlag ? artifactFileRna : artifactFileDna);
-			
+
 			if(phixFlag){filterrefs.add(phixRef);}
+			if(lambdaFlag){filterrefs.add(lambdaRef);}
 			if(pjetFlag){filterrefs.add(pjetRef);}
+			
+			if(copyUndefined){argList.add("cu");}
 			
 
 			StringBuilder refstring=new StringBuilder();
@@ -617,7 +623,7 @@ public class BBQC {
 		String[] dukargs=argList.toArray(new String[0]);
 		
 		{//Run BBDuk
-			BBDukF duk=new BBDukF(dukargs);
+			BBDuk duk=new BBDuk(dukargs);
 			try {
 				duk.process();
 			} catch (Exception e) {
@@ -646,7 +652,7 @@ public class BBQC {
 	 * @param qfout2 Secondary output qual file
 	 * @param inPrefix Append this prefix to input filenames
 	 */
-	private void dehumanize(String in1, String in2, String out1, String out2, String qfin1, String qfin2, 
+	private void dehumanize(String in1, String in2, String out1, String out2, String qfin1, String qfin2,
 			String inPrefix, String outPrefix, boolean prependIndir, boolean prependOutdir, boolean lastPhase){
 		
 		log("dehumanize start", true);
@@ -728,7 +734,7 @@ public class BBQC {
 	 * @param qfout2 Secondary output qual file
 	 * @param inPrefix Append this prefix to input filenames
 	 */
-	private void normalize(String in1, String in2, String out1, String out2, String qfin1, String qfin2, String qfout1, String qfout2,  
+	private void normalize(String in1, String in2, String out1, String out2, String qfin1, String qfin2, String qfout1, String qfout2,
 			String inPrefix, String outPrefix, boolean prependIndir, boolean prependOutdir, boolean lastPhase){
 		
 		log("normalization start", true);
@@ -902,17 +908,8 @@ public class BBQC {
 		return sdf.format(new Date());
 	}
 	
-	/**
-	 * Strips the directories, leaving only a filename
-	 * @param fname
-	 * @return
-	 */
-	public static String stripDirs(String fname){
-		if(fname==null){return null;}
-		if(fname.indexOf('\\')>=0){fname=fname.replace('\\', '/');}
-		final int index=fname.lastIndexOf('/');
-		if(index>=0){fname=fname.substring(index+1);}
-		return fname;
+	private static String stripDirs(String path){
+		return ReadWrite.stripPath(path);
 	}
 	
 	/*--------------------------------------------------------------*/
@@ -948,6 +945,8 @@ public class BBQC {
 	private boolean rnaFlag=false;
 	/** True if phix should be filtered out */
 	private boolean phixFlag=true;
+	/** True if lambda should be filtered out by kmer-match */
+	private boolean lambdaFlag=true;
 	/** True if pjet should be filtered out */
 	private boolean pjetFlag=true;
 	
@@ -961,9 +960,9 @@ public class BBQC {
 	/** Toss reads shorter than this fraction of initial length, after trimming */
 	private float minLenFraction=0.6f;
 	/** Trim bases at this quality or below */
-	private byte trimq=12;
-	/** Throw away reads below this average quality before trimming.  Default: 8 */
-	private byte minAvgQuality=8;
+	private float trimq=12;
+	/** Throw away reads below this average quality after trimming.  Default: 8 */
+	private float minAvgQuality=8;
 	/** If positive, calculate the average quality from the first X bases. */
 	private int minAvgQualityBases=0;
 	
@@ -1005,10 +1004,11 @@ public class BBQC {
 	private int minhits=1;
 	private boolean fast=true;
 	private boolean local=true;
+	private boolean copyUndefined=false;
 	
 	private boolean verbose=false;
 	private boolean overwrite=true;
-	private boolean append=false;
+//	private boolean append=false;
 	private boolean compress=true;
 	
 	/** Arguments to pass to BBDuk */
@@ -1026,7 +1026,7 @@ public class BBQC {
 	private String outDir="";
 	
 	/** Directory in which to write all temp files */
-	private String tmpDir=Shared.TMPDIR;
+	private String tmpDir=Shared.tmpdir();
 	
 	private final String tempSalt;
 	
@@ -1076,6 +1076,7 @@ public class BBQC {
 	private String artifactFileRna = "/global/dna/shared/rqc/ref_databases/qaqc/databases/illumina.artifacts/RNA_spikeins.artifacts.2012.10.NoPolyA.fa";
 	private String artifactFileDna = "/global/dna/shared/rqc/ref_databases/qaqc/databases/illumina.artifacts/DNA_spikeins.artifacts.2012.10.fa";
 	private String phixRef = "/global/dna/shared/rqc/ref_databases/qaqc/databases/phix174_ill.ref.fa";
+	private String lambdaRef = "/global/dna/shared/rqc/ref_databases/qaqc/databases/lambda.fa.gz";
 	private String pjetRef = "/global/dna/shared/rqc/ref_databases/qaqc/databases/pJET1.2.fasta";
 
 	private String allArtifactsLatest = "/global/projectb/sandbox/rqc/qcdb/illumina.artifacts/Illumina.artifacts.fa";

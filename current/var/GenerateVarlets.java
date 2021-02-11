@@ -4,32 +4,29 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.zip.ZipOutputStream;
 
+import align2.MultiStateAligner9ts;
+import align2.TranslateColorspaceRead;
+import dna.Data;
+import dna.Gene;
+import fileIO.ReadWrite;
+import fileIO.TextFile;
 import pacbio.CalcCoverageFromSites;
 import pacbio.SiteR;
-
+import shared.Parse;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
 import stream.ConcurrentLegacyReadInputStream;
 import stream.RTextInputStream;
 import stream.Read;
 import stream.SiteScore;
 import stream.SiteScoreR;
 import structures.ListNum;
-import dna.Data;
-import dna.Gene;
-import dna.Timer;
-
-import fileIO.ReadWrite;
-import fileIO.TextFile;
-import align2.MSA;
-import align2.MultiStateAligner9ts;
-import align2.Tools;
-import align2.TranslateColorspaceRead;
 
 public class GenerateVarlets {
-	
 	
 	public static void main(String[] args){
 		
@@ -52,12 +49,12 @@ public class GenerateVarlets {
 			String[] split=arg.split("=");
 			if(arg.equals("condense")){CONDENSE=true;}
 			else if(arg.startsWith("condense=")){
-				CONDENSE=Tools.parseBoolean(split[1]);
+				CONDENSE=Parse.parseBoolean(split[1]);
 			}else if(arg.equals("condensesnps")){CONDENSE_SNPS=true;}
 			else if(arg.startsWith("condensesnps=")){
-				CONDENSE_SNPS=Tools.parseBoolean(split[1]);
+				CONDENSE_SNPS=Parse.parseBoolean(split[1]);
 			}else if(arg.startsWith("splitsubs=")){
-				SPLIT_SUBS=Tools.parseBoolean(split[1]);
+				SPLIT_SUBS=Parse.parseBoolean(split[1]);
 			}else if(arg.equals("tosssolo1")){
 				TOSS_SOLO1=true;
 			}else if(arg.equals("tosssolo2")){
@@ -225,7 +222,7 @@ public class GenerateVarlets {
 	 */
 	private static final HashMap<Long, ArrayList<SiteScoreR>> loadSites_old(String fname) {
 		HashMap<Long, ArrayList<SiteScoreR>> map=new HashMap<Long, ArrayList<SiteScoreR>>(4096);
-		TextFile tf=new TextFile(fname, false, false);
+		TextFile tf=new TextFile(fname, false);
 		
 		for(String s=tf.nextLine(); s!=null; s=tf.nextLine()){
 			SiteScoreR[] array=CalcCoverageFromSites.toSites(s);
@@ -253,7 +250,7 @@ public class GenerateVarlets {
 	 */
 	private static final HashMap<Long, SiteR> loadSites(String fname) {
 		HashMap<Long, SiteR> map=new HashMap<Long, SiteR>(4096);
-		TextFile tf=new TextFile(fname, false, false);
+		TextFile tf=new TextFile(fname, false);
 		
 		for(String s=tf.nextLine(); s!=null; s=tf.nextLine()){
 			SiteScoreR[] array=CalcCoverageFromSites.toSites(s);
@@ -305,11 +302,11 @@ public class GenerateVarlets {
 				
 				while(!terminate && reads!=null && reads.size()>0){
 					if(processReads){processReads(reads);}
-					cris.returnList(ln.id, ln.list.isEmpty());
+					cris.returnList(ln);
 					ln=cris.nextList();
 					reads=(ln!=null ? ln.list : null);
 				}
-				cris.returnList(ln.id, ln.list.isEmpty());
+				cris.returnList(ln);
 			}else{
 				ArrayList<Read> reads=stream.nextList();
 				while(!terminate && reads!=null && reads.size()>0){
@@ -323,7 +320,7 @@ public class GenerateVarlets {
 					if(MERGE_EQUAL_VARLETS){
 						mergeEqualVarlets(list);
 					}else{
-						Collections.sort(list);
+						Shared.sort(list);
 					}
 					writeList(list);
 					list=null;
@@ -531,7 +528,7 @@ public class GenerateVarlets {
 //				System.err.println(r.mate.toText(false));
 //				System.err.println(r.mate.copies);
 //				System.err.println();
-//				
+//
 //				for(Varlet v : vars){
 //					System.err.println(v.toText());
 //					System.err.println(v.numReads);
@@ -575,7 +572,7 @@ public class GenerateVarlets {
 				if(MERGE_EQUAL_VARLETS){
 					mergeEqualVarlets(list);
 				}else{
-					Collections.sort(list);
+					Shared.sort(list);
 				}
 				
 				writeList(list);
@@ -585,7 +582,7 @@ public class GenerateVarlets {
 		
 		private void mergeEqualVarlets(ArrayList<Varlet> vars){
 
-			Collections.sort(vars);
+			Shared.sort(vars);
 			ArrayList<Varlet> list=new ArrayList<Varlet>(8);
 			for(int i=0; i<vars.size(); i++){
 				Varlet a=vars.get(i);
@@ -610,7 +607,7 @@ public class GenerateVarlets {
 		protected boolean finished(){return finished;}
 		protected void terminate(){terminate=true;}
 		
-		private final TranslateColorspaceRead tcr=new TranslateColorspaceRead(PAC_BIO_MODE ? 
+		private final TranslateColorspaceRead tcr=new TranslateColorspaceRead(PAC_BIO_MODE ?
 				new MultiStateAligner9ts(ALIGN_ROWS, ALIGN_COLUMNS) :  new MultiStateAligner9ts(ALIGN_ROWS, ALIGN_COLUMNS));
 		private final ArrayList<Varlet> lists[]=new ArrayList[Gene.chromCodes.length];
 		private boolean finished=false;

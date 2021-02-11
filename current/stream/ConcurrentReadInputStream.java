@@ -3,13 +3,14 @@ package stream;
 import java.util.ArrayList;
 import java.util.Arrays;
 
-import align2.Shared;
 import fileIO.FileFormat;
 import fileIO.ReadWrite;
+import shared.Shared;
 import structures.ListNum;
 
 /**
  * Abstract superclass of all ConcurrentReadStreamInterface implementations.
+ * ConcurrentReadInputStreams allow paired reads from twin files to be treated as a single stream.
  * @author Brian Bushnell
  * @date Nov 26, 2014
  *
@@ -22,6 +23,11 @@ public abstract class ConcurrentReadInputStream implements ConcurrentReadStreamI
 	
 	protected ConcurrentReadInputStream(){}
 	
+	/**
+	 * Special method for testing, handles some parsing.
+	 * Used by MultiCros.
+	 * Not really necessary; safe to remove.
+	 */
 	protected static ConcurrentReadInputStream getReadInputStream(long maxReads, boolean keepSamHeader, boolean allowSubprocess, String...args){
 		assert(args.length>0) : Arrays.toString(args);
 		for(int i=0; i<args.length; i++){
@@ -41,52 +47,41 @@ public abstract class ConcurrentReadInputStream implements ConcurrentReadStreamI
 		return getReadInputStream(maxReads, keepSamHeader, ff1, ff2, qf1, qf2);
 	}
 	
+	/** @See primary method */
 	public static ConcurrentReadInputStream getReadInputStream(long maxReads, boolean keepSamHeader, FileFormat ff1, FileFormat ff2){
 		return getReadInputStream(maxReads, keepSamHeader, ff1, ff2, (String)null, (String)null, Shared.USE_MPI, Shared.MPI_KEEP_ALL);
 	}
 	
-	public static ConcurrentReadInputStream getReadInputStream(long maxReads, boolean keepSamHeader, FileFormat ff1, FileFormat ff2, 
+	/** @See primary method */
+	public static ConcurrentReadInputStream getReadInputStream(long maxReads, boolean keepSamHeader, FileFormat ff1, FileFormat ff2,
 			final boolean mpi, final boolean keepAll){
 		return getReadInputStream(maxReads, keepSamHeader, ff1, ff2, (String)null, (String)null, mpi, keepAll);
 	}
 	
-	public static ConcurrentReadInputStream getReadInputStream(long maxReads, boolean keepSamHeader, 
+//	/** @See primary method */
+//	public static ConcurrentReadInputStream getReadInputStream(long maxReads, boolean keepSamHeader, FileFormat ff1, String qf1){
+//		return getReadInputStream(maxReads, keepSamHeader, ff1, null, qf1, null, Shared.USE_MPI, Shared.MPI_KEEP_ALL);
+//	}
+	
+	/** @See primary method */
+	public static ConcurrentReadInputStream getReadInputStream(long maxReads, boolean keepSamHeader,
 			FileFormat ff1, FileFormat ff2, String qf1, String qf2){
 		return getReadInputStream(maxReads, keepSamHeader, ff1, ff2, qf1, qf2, Shared.USE_MPI, Shared.MPI_KEEP_ALL);
 	}
 	
-	public static ArrayList<Read> getReads(long maxReads, boolean keepSamHeader, 
-			FileFormat ff1, FileFormat ff2, String qf1, String qf2){
-		ConcurrentReadInputStream cris=getReadInputStream(maxReads, keepSamHeader, ff1, ff2, qf1, qf2, Shared.USE_MPI, Shared.MPI_KEEP_ALL);
-		return cris.getReads();
-	}
-	
-	public ArrayList<Read> getReads(){
-		
-		ListNum<Read> ln=nextList();
-		ArrayList<Read> reads=(ln!=null ? ln.list : null);
-		
-		ArrayList<Read> out=new ArrayList<Read>();
-		
-		while(reads!=null && reads.size()>0){
-			out.addAll(reads);
-			returnList(ln.id, ln.list.isEmpty());
-			ln=nextList();
-			reads=(ln!=null ? ln.list : null);
-		}
-		if(ln!=null){
-			returnList(ln.id, ln.list==null || ln.list.isEmpty());
-		}
-		boolean error=ReadWrite.closeStream(this);
-		if(error){
-			System.err.println("Warning - an error was encountered during read input.");
-		}
-		return out;
-	}
-	
-	public static ConcurrentReadInputStream getReadInputStream(long maxReads, boolean keepSamHeader, 
+	/**
+	 * @param maxReads Quit producing after this many reads (or pairs)
+	 * @param keepSamHeader If the input is sam, store the header in the static shared header object 
+	 * @param ff1 Read 1 file (required)
+	 * @param ff2 Read 2 file (optional)
+	 * @param qf1 Qual file 1 (optional)
+	 * @param qf2 Qual file 2 (optional)
+	 * @param mpi True if MPI will be used
+	 * @param keepAll In MPI mode, tells this stream to keep all reads instead of just a fraction
+	 * @return
+	 */
+	public static ConcurrentReadInputStream getReadInputStream(long maxReads, boolean keepSamHeader,
 			FileFormat ff1, FileFormat ff2, String qf1, String qf2, final boolean mpi, final boolean keepAll){
-		
 		if(mpi){
 			final int rank=Shared.MPI_RANK;
 			final ConcurrentReadInputStream cris0;
@@ -116,17 +111,42 @@ public abstract class ConcurrentReadInputStream implements ConcurrentReadStreamI
 		
 		if(ff1.fastq()){
 			
-			ReadInputStream ris1=new FastqReadInputStream(ff1);
-			ReadInputStream ris2=(ff2==null ? null : new FastqReadInputStream(ff2));
+			ReadInputStream ris1, ris2;
+			
+			ris1=new FastqReadInputStream(ff1);
+			try {
+				ris2=(ff2==null ? null : new FastqReadInputStream(ff2));
+			} catch (AssertionError e) {//Handles problems with quality score autodetection
+				ris1.close();
+				throw e;
+			}
 			cris=new ConcurrentGenericReadInputStream(ris1, ris2, maxReads);
 			
+		}else if(ff1.oneline()){
+			
+			ReadInputStream ris1=new OnelineReadInputStream(ff1);
+			ReadInputStream ris2=(ff2==null ? null : new OnelineReadInputStream(ff2));
+			cris=new ConcurrentGenericReadInputStream(ris1, ris2, maxReads);
+
 		}else if(ff1.fasta()){
 			
-			ReadInputStream ris1=(qf1==null ? new FastaReadInputStream(ff1, (FASTQ.FORCE_INTERLEAVED && ff2==null), Shared.AMINO_IN, ff2==null ? Shared.READ_BUFFER_MAX_DATA : -1)
-				: new FastaQualReadInputStream(ff1, qf1));
-			ReadInputStream ris2=(ff2==null ? null : qf2==null ? new FastaReadInputStream(ff2, false, Shared.AMINO_IN, -1) : new FastaQualReadInputStream(ff2, qf2));
+			ReadInputStream ris1;
+			ReadInputStream ris2;
+			if(ff1.preferShreds()){
+				ris1=new FastaShredInputStream(ff1, Shared.AMINO_IN, ff2==null ? Shared.bufferData() : -1);
+				ris2=(ff2==null ? null : new FastaShredInputStream(ff2, Shared.AMINO_IN, -1));
+			}else{
+				ris1=(qf1==null ? new FastaReadInputStream(ff1, (FASTQ.FORCE_INTERLEAVED && ff2==null), Shared.AMINO_IN, ff2==null ? Shared.bufferData() : -1)
+						: new FastaQualReadInputStream(ff1, qf1));
+				ris2=(ff2==null ? null : qf2==null ? new FastaReadInputStream(ff2, false, Shared.AMINO_IN, -1) : new FastaQualReadInputStream(ff2, qf2));
+			}
 			cris=new ConcurrentGenericReadInputStream(ris1, ris2, maxReads);
 			
+//			cris.start();
+//			ListNum<Read> ln=cris.nextList();
+//			System.out.println(ln);
+//			
+//			assert(false) : ff1+", "+ff2;
 		}else if(ff1.scarf()){
 			
 			ReadInputStream ris1=new ScarfReadInputStream(ff1);
@@ -164,6 +184,16 @@ public abstract class ConcurrentReadInputStream implements ConcurrentReadStreamI
 			RandomReadInputStream3 ris=new RandomReadInputStream3(maxReads, FASTQ.FORCE_INTERLEAVED);
 			cris=new ConcurrentGenericReadInputStream(ris, null, maxReads);
 			
+		}else if(ff1.embl()){
+			
+			EmblReadInputStream ris=new EmblReadInputStream(ff1);
+			cris=new ConcurrentGenericReadInputStream(ris, null, maxReads);
+			
+		}else if(ff1.gbk()){
+			
+			GbkReadInputStream ris=new GbkReadInputStream(ff1);
+			cris=new ConcurrentGenericReadInputStream(ris, null, maxReads);
+			
 		}else{
 			cris=null;
 			throw new RuntimeException(""+ff1);
@@ -177,6 +207,35 @@ public abstract class ConcurrentReadInputStream implements ConcurrentReadStreamI
 	/*----------------         Outer Methods        ----------------*/
 	/*--------------------------------------------------------------*/
 	
+	public static ArrayList<Read> getReads(long maxReads, boolean keepSamHeader,
+			FileFormat ff1, FileFormat ff2, String qf1, String qf2){
+		ConcurrentReadInputStream cris=getReadInputStream(maxReads, keepSamHeader, ff1, ff2, qf1, qf2, Shared.USE_MPI, Shared.MPI_KEEP_ALL);
+		cris.start();
+		return cris.getReads();
+	}
+	
+	public ArrayList<Read> getReads(){
+		
+		ListNum<Read> ln=nextList();
+		ArrayList<Read> reads=(ln!=null ? ln.list : null);
+		
+		ArrayList<Read> out=new ArrayList<Read>();
+		
+		while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
+			out.addAll(reads);
+			returnList(ln.id, ln.list.isEmpty());
+			ln=nextList();
+			reads=(ln!=null ? ln.list : null);
+		}
+		if(ln!=null){
+			returnList(ln.id, ln.list==null || ln.list.isEmpty());
+		}
+		boolean error=ReadWrite.closeStream(this);
+		if(error){
+			System.err.println("Warning - an error was encountered during read input.");
+		}
+		return out;
+	}
 	
 	@Override
 	public void start(){
@@ -194,6 +253,11 @@ public abstract class ConcurrentReadInputStream implements ConcurrentReadStreamI
 	
 	@Override
 	public abstract ListNum<Read> nextList();
+	
+	@Override
+	public final void returnList(ListNum<Read> ln){
+		if(ln!=null){returnList(ln.id, ln.isEmpty());}
+	}
 	
 	@Override
 	public abstract void returnList(long listNum, boolean poison);
@@ -235,9 +299,9 @@ public abstract class ConcurrentReadInputStream implements ConcurrentReadStreamI
 	/*----------------            Fields            ----------------*/
 	/*--------------------------------------------------------------*/
 	
-	final int BUF_LEN=Shared.READ_BUFFER_LENGTH;
+	final int BUF_LEN=Shared.bufferLen();;
 	final int NUM_BUFFS=Shared.numBuffers();
-	final long MAX_DATA=Shared.READ_BUFFER_MAX_DATA;
+	final long MAX_DATA=Shared.bufferData();
 	public boolean ALLOW_UNEQUAL_LENGTHS=false;
 	boolean started=false;
 	

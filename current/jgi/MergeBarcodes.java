@@ -3,26 +3,28 @@ package jgi;
 import java.io.File;
 import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Locale;
 
-import stream.ConcurrentGenericReadInputStream;
-import stream.ConcurrentReadInputStream;
-import stream.FASTQ;
-import stream.FastaReadInputStream;
-import stream.ConcurrentReadOutputStream;
-import stream.Read;
-import structures.ListNum;
-import dna.Parser;
-import dna.Timer;
 import fileIO.ByteFile;
 import fileIO.ByteFile1;
 import fileIO.ByteFile2;
-import fileIO.ReadWrite;
 import fileIO.FileFormat;
-import align2.ReadStats;
-import align2.Shared;
-import align2.Tools;
+import fileIO.ReadWrite;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Shared;
+import shared.Timer;
+import shared.Tools;
+import stream.ConcurrentGenericReadInputStream;
+import stream.ConcurrentReadInputStream;
+import stream.ConcurrentReadOutputStream;
+import stream.FASTQ;
+import stream.FastaReadInputStream;
+import stream.Read;
+import structures.ListNum;
 
 /**
  * @author Brian Bushnell
@@ -33,27 +35,24 @@ public class MergeBarcodes {
 
 	public static void main(String[] args){
 		Timer t=new Timer();
-		MergeBarcodes mb=new MergeBarcodes(args);
-		HashMap<String, Read> map=mb.loadBarcodes();
-		mb.mergeWithMap(t, map);
+		MergeBarcodes x=new MergeBarcodes(args);
+		HashMap<String, Read> map=x.loadBarcodes();
+		x.mergeWithMap(t, map);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(x.outstream);
 	}
 	
 	public MergeBarcodes(String[] args){
 		
-		args=Parser.parseConfig(args);
-		if(Parser.parseHelp(args, true)){
-			printOptions();
-			System.exit(0);
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
 		}
 		
-		for(String s : args){if(s.startsWith("out=standardout") || s.startsWith("out=stdout")){outstream=System.err;}}
-		outstream.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
-		
 		boolean setInterleaved=false; //Whether it was explicitly set.
-
 		
-		
-		Shared.READ_BUFFER_LENGTH=Tools.min(200, Shared.READ_BUFFER_LENGTH);
 		Shared.capBuffers(4);
 		ReadWrite.USE_PIGZ=ReadWrite.USE_UNPIGZ=true;
 		ReadWrite.MAX_ZIP_THREADS=Shared.threads();
@@ -65,30 +64,29 @@ public class MergeBarcodes {
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if(b==null || b.equalsIgnoreCase("null")){b=null;}
-			while(a.startsWith("-")){a=a.substring(1);} //In case people use hyphens
 
 			if(parser.parse(arg, a, b)){
 				//do nothing
 			}else if(a.equals("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 				ByteFile1.verbose=verbose;
 				ByteFile2.verbose=verbose;
 				stream.FastaReadInputStream.verbose=verbose;
 				ConcurrentGenericReadInputStream.verbose=verbose;
-//				align2.FastaReadInputStream2.verbose=verbose;
 				stream.FastqReadInputStream.verbose=verbose;
 				ReadWrite.verbose=verbose;
 			}else if(a.equals("barcode") || a.equals("bar") || a.equals("index")){
 				inbar=b;
 			}else if(a.equals("addslash")){
-				addslash=Tools.parseBoolean(b);
+				addslash=Parse.parseBoolean(b);
+			}else if(a.equals("addcolon")){
+				addcolon=Parse.parseBoolean(b);
 			}else if(a.equals("rcompmate") || a.equals("rcm")){
-				reverseComplimentMate=Tools.parseBoolean(b);
-				outstream.println("Set RCOMPMATE to "+reverseComplimentMate);
+				reverseComplementMate=Parse.parseBoolean(b);
+				outstream.println("Set RCOMPMATE to "+reverseComplementMate);
 			}else if(a.equals("rcomp") || a.equals("rc")){
-				reverseCompliment=Tools.parseBoolean(b);
-				outstream.println("Set RCOMP to "+reverseCompliment);
+				reverseComplement=Parse.parseBoolean(b);
+				outstream.println("Set RCOMP to "+reverseComplement);
 			}else if(parser.in1==null && i==0 && !arg.contains("=") && (arg.toLowerCase().startsWith("stdin") || new File(arg).exists())){
 				parser.in1=arg;
 			}else{
@@ -137,19 +135,13 @@ public class MergeBarcodes {
 		
 		assert(FastaReadInputStream.settingsOK());
 		
-		if(in1==null){
-			printOptions();
-			throw new RuntimeException("Error - at least one input file is required.");
-		}
+		if(in1==null){throw new RuntimeException("Error - at least one input file is required.");}
 		if(!ByteFile.FORCE_MODE_BF1 && !ByteFile.FORCE_MODE_BF2 && Shared.threads()>2){
 			ByteFile.FORCE_MODE_BF2=true;
 		}
 		
 		if(out1==null){
-			if(out2!=null){
-				printOptions();
-				throw new RuntimeException("Error - cannot define out2 without defining out1.");
-			}
+			if(out1==null){throw new RuntimeException("Error - cannot define out2 without defining out1.");}
 			if(!parser.setOut){
 				System.err.println("No output stream specified.  To write to stdout, please specify 'out=stdout.fq' or similar.");
 //				out1="stdout";
@@ -228,7 +220,7 @@ public class MergeBarcodes {
 				assert((r.mate!=null)==cris.paired());
 			}
 
-			while(reads!=null && reads.size()>0){
+			while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
 				
 				for(int idx=0; idx<reads.size(); idx++){
 					final Read r1=reads.get(idx);
@@ -251,7 +243,7 @@ public class MergeBarcodes {
 					map.put(r1.id, r1);
 				}
 
-				cris.returnList(ln.id, ln.list.isEmpty());
+				cris.returnList(ln);
 				ln=cris.nextList();
 				reads=(ln!=null ? ln.list : null);
 			}
@@ -268,16 +260,13 @@ public class MergeBarcodes {
 		double rpnano=readsProcessed/(double)(t.elapsed);
 		double bpnano=basesProcessed/(double)(t.elapsed);
 
-		String rpstring=(readsProcessed<100000 ? ""+readsProcessed : readsProcessed<100000000 ? (readsProcessed/1000)+"k" : (readsProcessed/1000000)+"m");
-		String bpstring=(basesProcessed<100000 ? ""+basesProcessed : basesProcessed<100000000 ? (basesProcessed/1000)+"k" : (basesProcessed/1000000)+"m");
-
-		while(rpstring.length()<8){rpstring=" "+rpstring;}
-		while(bpstring.length()<8){bpstring=" "+bpstring;}
+		String rpstring=Tools.padKM(readsProcessed, 8);
+		String bpstring=Tools.padKM(basesProcessed, 8);
 		
 		outstream.println("Loaded barcodes.");
 		outstream.println("Time:                         \t"+t);
-		outstream.println("Barcodes Processed: "+rpstring+" \t"+String.format("%.2fk reads/sec", rpnano*1000000));
-		outstream.println("Bases Processed:    "+bpstring+" \t"+String.format("%.2fm bases/sec", bpnano*1000));
+		outstream.println("Barcodes Processed: "+rpstring+" \t"+String.format(Locale.ROOT, "%.2fk reads/sec", rpnano*1000000));
+		outstream.println("Bases Processed:    "+bpstring+" \t"+String.format(Locale.ROOT, "%.2fm bases/sec", bpnano*1000));
 		outstream.println();
 		
 		if(errorState){
@@ -307,7 +296,7 @@ public class MergeBarcodes {
 
 			if(cris.paired() && out2==null && (in1==null || !in1.contains(".sam"))){
 				outstream.println("Writing interleaved.");
-			}			
+			}
 
 			assert(!out1.equalsIgnoreCase(in1) && !out1.equalsIgnoreCase(in1)) : "Input file and output file have same name.";
 			assert(out2==null || (!out2.equalsIgnoreCase(in1) && !out2.equalsIgnoreCase(in2))) : "out1 and out2 have same name.";
@@ -334,7 +323,7 @@ public class MergeBarcodes {
 				assert((ffin1==null || ffin1.samOrBam()) || (r.mate!=null)==cris.paired());
 			}
 
-			while(reads!=null && reads.size()>0){
+			while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
 
 				for(int idx=0; idx<reads.size(); idx++){
 					final Read r1=reads.get(idx);
@@ -346,12 +335,12 @@ public class MergeBarcodes {
 					{
 						readsProcessed++;
 						basesProcessed+=initialLength1;
-						if(reverseCompliment){r1.reverseComplement();}
+						if(reverseComplement){r1.reverseComplement();}
 					}
 					if(r2!=null){
 						readsProcessed++;
 						basesProcessed+=initialLength2;
-						if(reverseCompliment || reverseComplimentMate){r2.reverseComplement();}
+						if(reverseComplement || reverseComplementMate){r2.reverseComplement();}
 					}
 
 					String key=r1.id;
@@ -379,7 +368,7 @@ public class MergeBarcodes {
 
 				if(ros!=null){ros.add(listOut, ln.id);}
 
-				cris.returnList(ln.id, ln.list.isEmpty());
+				cris.returnList(ln);
 				ln=cris.nextList();
 				reads=(ln!=null ? ln.list : null);
 			}
@@ -394,23 +383,9 @@ public class MergeBarcodes {
 
 		t.stop();
 
-		double rpnano=readsProcessed/(double)(t.elapsed);
-		double bpnano=basesProcessed/(double)(t.elapsed);
-
-		String rpstring=(readsProcessed<100000 ? ""+readsProcessed : readsProcessed<100000000 ? (readsProcessed/1000)+"k" : (readsProcessed/1000000)+"m");
-		String bpstring=(basesProcessed<100000 ? ""+basesProcessed : basesProcessed<100000000 ? (basesProcessed/1000)+"k" : (basesProcessed/1000000)+"m");
-
-		while(rpstring.length()<8){rpstring=" "+rpstring;}
-		while(bpstring.length()<8){bpstring=" "+bpstring;}
-
-		{
-			outstream.println("Barcodes Found:         \t"+barcodesFound+" reads ("+String.format("%.2f",barcodesFound*100.0/readsProcessed)+"%)");
-			outstream.println("Barcodes Not Found:     \t"+barcodesNotFound+" reads ("+String.format("%.2f",barcodesNotFound*100.0/readsProcessed)+"%)");
-		}
-
-		outstream.println("Time:                         \t"+t);
-		outstream.println("Reads Processed:    "+rpstring+" \t"+String.format("%.2fk reads/sec", rpnano*1000000));
-		outstream.println("Bases Processed:    "+bpstring+" \t"+String.format("%.2fm bases/sec", bpnano*1000));
+		outstream.println(Tools.timeReadsBasesProcessed(t, readsProcessed, basesProcessed, 8));
+		outstream.println("Barcodes Found:         \t"+barcodesFound+" reads ("+String.format(Locale.ROOT, "%.2f",barcodesFound*100.0/readsProcessed)+"%)");
+		outstream.println("Barcodes Not Found:     \t"+barcodesNotFound+" reads ("+String.format(Locale.ROOT, "%.2f",barcodesNotFound*100.0/readsProcessed)+"%)");
 
 		if(errorState){
 			throw new RuntimeException("ReformatReads terminated in an error state; the output may be corrupt.");
@@ -418,22 +393,6 @@ public class MergeBarcodes {
 	}
 	
 	/*--------------------------------------------------------------*/
-	
-	private void printOptions(){
-		assert(false) : "printOptions: TODO";
-//		outstream.println("Syntax:\n");
-//		outstream.println("java -ea -Xmx512m -cp <path> jgi.ReformatReads in=<infile> in2=<infile2> out=<outfile> out2=<outfile2>");
-//		outstream.println("\nin2 and out2 are optional.  \nIf input is paired and there is only one output file, it will be written interleaved.\n");
-//		outstream.println("Other parameters and their defaults:\n");
-//		outstream.println("overwrite=false  \tOverwrites files that already exist");
-//		outstream.println("ziplevel=4       \tSet compression level, 1 (low) to 9 (max)");
-//		outstream.println("interleaved=false\tDetermines whether input file is considered interleaved");
-//		outstream.println("fastawrap=70     \tLength of lines in fasta output");
-//		outstream.println("qin=auto         \tASCII offset for input quality.  May be set to 33 (Sanger), 64 (Illumina), or auto");
-//		outstream.println("qout=auto        \tASCII offset for output quality.  May be set to 33 (Sanger), 64 (Illumina), or auto (meaning same as input)");
-//		outstream.println("outsingle=<file> \t(outs) Write singleton reads here, when conditionally discarding reads from pairs.");
-	}
-	
 	
 	/*--------------------------------------------------------------*/
 	
@@ -456,10 +415,12 @@ public class MergeBarcodes {
 	
 	/*--------------------------------------------------------------*/
 
-	private boolean reverseComplimentMate=false;
-	private boolean reverseCompliment=false;
-	/** Add /1 and /2 to paired reads */
+	private boolean reverseComplementMate=false;
+	private boolean reverseComplement=false;
+	/** Add /1 and /2 to read names */
 	private boolean addslash=false;
+	/** Add 1: and 2: to read names */
+	private boolean addcolon=false;
 
 	private long maxReads=-1;
 	

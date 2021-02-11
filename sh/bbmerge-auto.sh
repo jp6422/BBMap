@@ -1,7 +1,6 @@
 #!/bin/bash
-#merge in=<infile> out=<outfile>
 
-function usage(){
+usage(){
 echo "
 bbmerge-auto.sh is a wrapper for BBMerge that attempts to use all available
 memory, instead of a fixed amount.  This is for use with the Tadpole options
@@ -13,6 +12,7 @@ For information about usage and parameters, please run bbmerge.sh.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -25,11 +25,11 @@ popd > /dev/null
 
 #DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/"
 CP="$DIR""current/"
-NATIVELIBDIR="$DIR""jni/"
+JNI="-Djava.library.path=""$DIR""jni/"
+JNI=""
 
 z="-Xmx14g"
 z2="-Xms14g"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -39,6 +39,7 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 	if [[ $set == 1 ]]; then
 		return
@@ -50,12 +51,7 @@ calcXmx () {
 calcXmx "$@"
 
 function merge() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-		module load pigz
-	fi
-	local CMD="java -Djava.library.path=$NATIVELIBDIR $EA $z $z2 -cp $CP jgi.BBMerge $@"
+	local CMD="java $EA $EOOM $z $z2 $JNI -cp $CP jgi.BBMerge $@"
 	echo $CMD >&2
 	eval $CMD
 }

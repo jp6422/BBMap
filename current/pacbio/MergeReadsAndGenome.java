@@ -2,24 +2,23 @@ package pacbio;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
 
-import stream.ConcurrentGenericReadInputStream;
+import dna.Data;
+import fileIO.FileFormat;
+import fileIO.ReadWrite;
+import fileIO.TextStreamWriter;
+import shared.KillSwitch;
+import shared.Parse;
+import shared.Parser;
+import shared.PreParser;
+import shared.ReadStats;
+import shared.Tools;
 import stream.ConcurrentLegacyReadInputStream;
 import stream.ConcurrentReadInputStream;
-import stream.FASTQ;
 import stream.FastaReadInputStream;
 import stream.Read;
 import stream.SequentialReadInputStream;
 import structures.ListNum;
-import dna.Data;
-import dna.Parser;
-
-import fileIO.FileFormat;
-import fileIO.ReadWrite;
-import fileIO.TextStreamWriter;
-import align2.ReadStats;
-import align2.Tools;
 
 /**
  * @author Brian Bushnell
@@ -30,6 +29,13 @@ public class MergeReadsAndGenome {
 	
 	
 	public static void main(String[] args){
+		
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
+		
 		int genome=-1;
 		String in[]=null;
 		String out=null;
@@ -49,11 +55,9 @@ public class MergeReadsAndGenome {
 			final String arg=args[i];
 			final String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
-			String b=(split.length>1 ? split[1] : "true");
+			String b=split.length>1 ? split[1] : null;
 
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(Parser.parseCommonStatic(arg, a, b)){
+			if(Parser.parseCommonStatic(arg, a, b)){
 				//do nothing
 			}else if(Parser.parseZip(arg, a, b)){
 				//do nothing
@@ -70,20 +74,20 @@ public class MergeReadsAndGenome {
 			}else if(a.equals("build") || a.equals("genome")){
 				genome=Integer.parseInt(b);
 			}else if(a.equals("append") || a.equals("app")){
-				append=ReadStats.append=Tools.parseBoolean(b);
+				append=ReadStats.append=Parse.parseBoolean(b);
 			}else if(a.equals("overwrite") || a.equals("ow")){
-				overwrite=Tools.parseBoolean(b);
+				overwrite=Parse.parseBoolean(b);
 				System.out.println("Set overwrite to "+overwrite);
 			}else if(a.equals("reads")){
-				reads=Tools.parseKMG(b);
+				reads=Parse.parseKMG(b);
 			}else if(a.equals("readlen") || a.equals("length") || a.equals("len")){
 				readlen=Integer.parseInt(b);
 			}else if(a.equals("sequentialoverlap")){
 				sequentialOverlap=Integer.parseInt(b);
 			}else if(a.equals("sequentialstrandalt")){
-				sequentialStrandAlt=Tools.parseBoolean(b);
+				sequentialStrandAlt=Parse.parseBoolean(b);
 			}else if(a.equals("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 			}else{
 				System.err.println("Unknown parameter "+split[i]);
 				assert(false);
@@ -137,7 +141,7 @@ public class MergeReadsAndGenome {
 	public static long appendReads(ConcurrentReadInputStream cris, TextStreamWriter tsw, long id){
 		ListNum<Read> ln=cris.nextList();
 		ArrayList<Read> reads=(ln!=null ? ln.list : null);
-		while(reads!=null && reads.size()>0){
+		while(ln!=null && reads!=null && reads.size()>0){//ln!=null prevents a compiler potential null access warning
 
 			for(Read r : reads){
 				Read b=r.mate;
@@ -153,13 +157,13 @@ public class MergeReadsAndGenome {
 				}
 			}
 			
-			cris.returnList(ln.id, ln.list.isEmpty());
+			cris.returnList(ln);
 			//System.err.println("fetching list");
 			ln=cris.nextList();
 			reads=(ln!=null ? ln.list : null);
 		}
 		if(verbose){System.err.println("Finished reading");}
-		cris.returnList(ln.id, ln.list.isEmpty());
+		cris.returnList(ln);
 		if(verbose){System.err.println("Returned list");}
 		return id;
 	}
@@ -176,8 +180,8 @@ public class MergeReadsAndGenome {
 		while(stopN>0 && r.bases[stopN]=='N'){stopN--;}
 		if(startN>0 || stopN<r.length()-1){
 			if(r.length()-startN-stopN<50){return null;}
-			r.bases=Arrays.copyOfRange(r.bases, startN, stopN+1);
-			if(r.quality!=null){r.quality=Arrays.copyOfRange(r.quality, startN, stopN+1);}
+			r.bases=KillSwitch.copyOfRange(r.bases, startN, stopN+1);
+			if(r.quality!=null){r.quality=KillSwitch.copyOfRange(r.quality, startN, stopN+1);}
 		}
 		return r;
 	}

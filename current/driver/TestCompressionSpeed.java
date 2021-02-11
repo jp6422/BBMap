@@ -6,17 +6,16 @@ import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.util.zip.ZipOutputStream;
 
-import dna.Timer;
-
 import fileIO.ReadWrite;
 import fileIO.TextFile;
+import shared.Timer;
 
 public class TestCompressionSpeed {
 	
 	
 	public static void main(String[] args){
 		
-		TextFile tf=new TextFile(args[0], false, false);
+		TextFile tf=new TextFile(args[0], false);
 		String[] lines=tf.toStringLines();
 		tf.close();
 
@@ -70,7 +69,7 @@ public class TestCompressionSpeed {
 	
 	
 	public static String[] read(String fname){
-		TextFile tf=new TextFile(fname, false, false);
+		TextFile tf=new TextFile(fname, false);
 		String[] s=tf.toStringLines();
 		tf.close();
 		return s;

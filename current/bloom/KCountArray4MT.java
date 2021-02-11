@@ -4,7 +4,8 @@ import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.ArrayBlockingQueue;
 
-import dna.Timer;
+import shared.Shared;
+import shared.Timer;
 
 
 /**
@@ -17,6 +18,11 @@ import dna.Timer;
  */
 public class KCountArray4MT extends KCountArray {
 	
+	/**
+	 * 
+	 */
+	private static final long serialVersionUID = -575682515926973788L;
+
 	public static void main(String[] args){
 		long cells=Long.parseLong(args[0]);
 		int bits=Integer.parseInt(args[1]);
@@ -75,6 +81,7 @@ public class KCountArray4MT extends KCountArray {
 		assert(hashes>0 && hashes<=hashMasks.length);
 	}
 	
+	@Override
 	public int read(final long rawKey){
 		assert(finished);
 		if(verbose){System.err.println("Reading raw key "+rawKey);}
@@ -112,6 +119,7 @@ public class KCountArray4MT extends KCountArray {
 		return (int)((word>>>cellShift)&valueMask);
 	}
 	
+	@Override
 	public void write(final long key, int value){
 		throw new RuntimeException("Not allowed for this class.");
 	}
@@ -129,6 +137,7 @@ public class KCountArray4MT extends KCountArray {
 //		}
 //	}
 	
+	@Override
 	public void increment(final long rawKey){
 		if(verbose){System.err.println("\n*** Incrementing raw key "+rawKey+" ***");}
 		
@@ -206,19 +215,23 @@ public class KCountArray4MT extends KCountArray {
 		}
 	}
 	
+	@Override
 	public int incrementAndReturn(long key, int incr){
 		throw new RuntimeException("Operation not supported.");
 	}
 	
 	/** Returns unincremented value */
+	@Override
 	public int incrementAndReturnUnincremented(long key, int incr){
 		throw new RuntimeException("Operation not supported.");
 	}
 	
+	@Override
 	public long[] transformToFrequency(){
 		return transformToFrequency(matrix);
 	}
 	
+	@Override
 	public String toContentsString(){
 		StringBuilder sb=new StringBuilder();
 		sb.append("[");
@@ -239,10 +252,13 @@ public class KCountArray4MT extends KCountArray {
 		return sb.toString();
 	}
 	
+	@Override
 	public double usedFraction(){return cellsUsed/(double)cells;}
 	
+	@Override
 	public double usedFraction(int mindepth){return cellsUsed(mindepth)/(double)cells;}
 	
+	@Override
 	public long cellsUsed(int mindepth){
 		long count=0;
 		for(int[] array : matrix){
@@ -260,6 +276,7 @@ public class KCountArray4MT extends KCountArray {
 	}
 	
 	
+	@Override
 	final long hash(long key, int row){
 		int cell=(int)((Long.MAX_VALUE&key)%(hashArrayLength-1));
 //		int cell=(int)(hashCellMask&(key));
@@ -289,7 +306,7 @@ public class KCountArray4MT extends KCountArray {
 		
 		Timer t=new Timer();
 		long[][] r=new long[rows][cols];
-		Random randy=new Random(seed);
+		Random randy=Shared.threadLocalRandom(seed);
 		for(int i=0; i<r.length; i++){
 			fillMasks(r[i], randy);
 		}
@@ -298,12 +315,6 @@ public class KCountArray4MT extends KCountArray {
 		return r;
 	}
 	
-	
-	/**
-	 * @param cols
-	 * @param randy
-	 * @return
-	 */
 	private static void fillMasks(long[] r, Random randy) {
 //		for(int i=0; i<r.length; i++){
 //			long x=0;
@@ -355,6 +366,7 @@ public class KCountArray4MT extends KCountArray {
 	}
 	
 	
+	@Override
 	public void initialize(){
 		for(int i=0; i<writers.length; i++){
 			writers[i]=new WriteThread(i);
@@ -366,6 +378,7 @@ public class KCountArray4MT extends KCountArray {
 		}
 	}
 	
+	@Override
 	public void shutdown(){
 		if(finished){return;}
 		synchronized(this){
@@ -459,7 +472,7 @@ public class KCountArray4MT extends KCountArray {
 			array=null;
 		}
 		
-		private void add(long[] keys){
+		void add(long[] keys){
 //			assert(isAlive());
 			assert(!shutdown);
 			if(shutdown){return;}
@@ -508,12 +521,12 @@ public class KCountArray4MT extends KCountArray {
 	private boolean finished=false;
 	
 	private long cellsUsed;
-	private final int[][] matrix;
+	final int[][] matrix;
 	private final WriteThread[] writers=new WriteThread[numArrays];
 	private final int hashes;
-	private final int wordsPerArray;
+	final int wordsPerArray;
 	private final long cellsPerArray;
-	private final long cellMod;
+	final long cellMod;
 	private final long[][] hashMasks=makeMasks(8, hashArrayLength);
 	
 	private final long[][] buffers=new long[numArrays][1000];
@@ -522,7 +535,7 @@ public class KCountArray4MT extends KCountArray {
 	private static final int hashBits=6;
 	private static final int hashArrayLength=1<<hashBits;
 	private static final int hashCellMask=hashArrayLength-1;
-	private static final long[] poison=new long[0];
+	static final long[] poison=new long[0];
 	
 	private static long counter=0;
 	

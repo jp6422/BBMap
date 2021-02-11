@@ -3,14 +3,14 @@ package driver;
 import java.io.File;
 import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 
-import align2.Tools;
-import dna.Parser;
-import dna.Timer;
 import fileIO.FileFormat;
 import fileIO.ReadWrite;
 import fileIO.TextFile;
+import shared.Parse;
+import shared.PreParser;
+import shared.Shared;
+import shared.Timer;
 
 /**
  * Renames files based on their headers
@@ -22,35 +22,34 @@ public class RenameByHeader {
 	
 	public static void main(String[] args){
 		Timer t=new Timer();
-		RenameByHeader mb=new RenameByHeader(args);
-		mb.process(t);
+		RenameByHeader x=new RenameByHeader(args);
+		x.process(t);
+		
+		//Close the print stream if it was redirected
+		Shared.closeStream(x.outstream);
 	}
 	
 	public RenameByHeader(String[] args){
-		args=Parser.parseConfig(args);
-		if(Parser.parseHelp(args, true)){
-			assert(false);
-//			printOptions();
-			System.exit(0);
+		
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, getClass(), false);
+			args=pp.args;
+			outstream=pp.outstream;
 		}
 		
-		for(String s : args){if(s.startsWith("out=standardout") || s.startsWith("out=stdout")){outstream=System.err;}}
-		outstream.println("Executing "+getClass().getName()+" "+Arrays.toString(args)+"\n");
+		ReadWrite.USE_PIGZ=false;
+		ReadWrite.USE_UNPIGZ=false;
+		ReadWrite.USE_UNBGZIP=false;
 		
-		ReadWrite.USE_PIGZ=ReadWrite.USE_UNPIGZ=false;
-		
-//		Parser parser=new Parser();
 		for(int i=0; i<args.length; i++){
 			String arg=args[i];
 			String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if(b==null || b.equalsIgnoreCase("null")){b=null;}
-			while(a.startsWith("-")){a=a.substring(1);} //In case people use hyphens
 			
 			File f=(b==null ? new File(arg) : null);
 
-			if(f.exists()){
+			if(f!=null && f.exists()){
 				if(f.isDirectory()){
 					for(File f2 : f.listFiles()){
 						String name=f2.getAbsolutePath();
@@ -62,7 +61,7 @@ public class RenameByHeader {
 					list.add(f.getAbsolutePath());
 				}
 			}else if(a.equals("verbose")){
-				verbose=Tools.parseBoolean(b);
+				verbose=Parse.parseBoolean(b);
 				ReadWrite.verbose=verbose;
 			}else{
 				outstream.println("Unknown parameter "+args[i]);

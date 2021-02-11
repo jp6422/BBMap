@@ -1,10 +1,9 @@
 #!/bin/bash
-#removesmartbell in=<infile> out=<outfile>
 
 usage(){
 echo "
 Written by Brian Bushnell
-Last modified February 17, 2015
+Last modified May 2, 2017
 
 Description:  Remove Smart Bell adapters from PacBio reads.
 
@@ -12,16 +11,18 @@ Usage:        removesmartbell in=<input> out=<output> split=t
 
 Input may be fasta or fastq, compressed or uncompressed (not H5 files).
 
-
 Parameters:
 in=file         Specify the input file, or stdin.
 out=file        Specify the output file, or stdout.
-split=f         'split=t' splits reads at adapters; split=f masks adapters.
+adapter=        Specify the adapter sequence (default is normal SmrtBell).
+split=t            t: Splits reads at adapters.
+                   f: Masks adapters with X symbols.
 
 Please contact Brian Bushnell at bbushnell@lbl.gov if you encounter any problems.
 "
 }
 
+#This block allows symlinked shellscripts to correctly set classpath.
 pushd . > /dev/null
 DIR="${BASH_SOURCE[0]}"
 while [ -h "$DIR" ]; do
@@ -36,7 +37,6 @@ popd > /dev/null
 CP="$DIR""current/"
 
 z="-Xmx400m"
-EA="-ea"
 set=0
 
 if [ -z "$1" ] || [[ $1 == -h ]] || [[ $1 == --help ]]; then
@@ -46,16 +46,13 @@ fi
 
 calcXmx () {
 	source "$DIR""/calcmem.sh"
+	setEnvironment
 	parseXmx "$@"
 }
 calcXmx "$@"
 
 removesmartbell() {
-	if [[ $NERSC_HOST == genepool ]]; then
-		module unload oracle-jdk
-		module load oracle-jdk/1.7_64bit
-	fi
-	local CMD="java $EA $z -cp $CP pacbio.RemoveAdapters2 $@"
+	local CMD="java $EA $EOOM $z -cp $CP pacbio.RemoveAdapters2 $@"
 	echo $CMD >&2
 	eval $CMD
 }

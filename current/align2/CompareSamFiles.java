@@ -4,20 +4,27 @@ import java.io.File;
 import java.util.Arrays;
 import java.util.BitSet;
 
+import dna.Data;
+import fileIO.TextFile;
+import shared.KillSwitch;
+import shared.Parse;
+import shared.PreParser;
+import shared.Tools;
 import stream.Read;
 import stream.SamLine;
 import stream.SiteScore;
-
-import dna.Data;
-import dna.Parser;
-
-import fileIO.TextFile;
 
 /** Generate a file containing reads mapped correctly in one file and incorrectly in another file. */
 public class CompareSamFiles {
 	
 	
 	public static void main(String[] args){
+
+		{//Preparse block for help, config files, and outstream
+			PreParser pp=new PreParser(args, new Object() { }.getClass().getEnclosingClass(), false);
+			args=pp.args;
+			//outstream=pp.outstream;
+		}
 
 		String in1=null;
 		String in2=null;
@@ -28,26 +35,23 @@ public class CompareSamFiles {
 			final String[] split=arg.split("=");
 			String a=split[0].toLowerCase();
 			String b=split.length>1 ? split[1] : null;
-			if("null".equalsIgnoreCase(b)){b=null;}
-//			System.err.println("Processing "+args[i]);
-			if(Parser.isJavaFlag(arg)){
-				//jvm argument; do nothing
-			}else if(a.equals("path") || a.equals("root")){
+			
+			if(a.equals("path") || a.equals("root")){
 				Data.setPath(b);
 			}else if(a.equals("in") || a.equals("in1")){
 				in1=b;
 			}else if(a.equals("in2")){
 				in2=b;
 			}else if(a.equals("parsecustom")){
-				parsecustom=Tools.parseBoolean(b);
+				parsecustom=Parse.parseBoolean(b);
 			}else if(a.equals("thresh")){
 				THRESH2=Integer.parseInt(b);
 			}else if(a.equals("printerr")){
-				printerr=Tools.parseBoolean(b);
+				printerr=Parse.parseBoolean(b);
 //			}else if(a.equals("ssaha2") || a.equals("subtractleadingclip")){
-//				SamLine.SUBTRACT_LEADING_SOFT_CLIP=Tools.parseBoolean(b);
+//				SamLine.SUBTRACT_LEADING_SOFT_CLIP=Parse.parseBoolean(b);
 			}else if(a.equals("blasr")){
-				BLASR=Tools.parseBoolean(b);
+				BLASR=Parse.parseBoolean(b);
 			}else if(a.equals("q") || a.equals("quality") || a.startsWith("minq")){
 				minQuality=Integer.parseInt(b);
 			}else if(in1==null && i==0 && args[i].indexOf('=')<0 && (a.startsWith("stdin") || new File(args[i]).exists())){
@@ -55,9 +59,9 @@ public class CompareSamFiles {
 			}else if(in2==null && i==1 && args[i].indexOf('=')<0 && (a.startsWith("stdin") || new File(args[i]).exists())){
 				in2=args[i];
 			}else if(a.equals("reads")){
-				reads=Tools.parseKMG(b);
-			}else if(i==2 && args[i].indexOf('=')<0 && Character.isDigit(a.charAt(0))){
-				reads=Tools.parseKMG(a);
+				reads=Parse.parseKMG(b);
+			}else if(i==2 && args[i].indexOf('=')<0 && Tools.isDigit(a.charAt(0))){
+				reads=Parse.parseKMG(a);
 			}
 		}
 
@@ -70,9 +74,9 @@ public class CompareSamFiles {
 			System.err.println("Warning - number of expected reads was not specified.");
 		}
 
-		TextFile tf1=new TextFile(in1, false, false);
+		TextFile tf1=new TextFile(in1, false);
 		TextFile tf2=null;
-		if(in2!=null){tf2=new TextFile(in2, false, false);}
+		if(in2!=null){tf2=new TextFile(in2, false);}
 
 		BitSet truePos1=new BitSet((int)reads);
 		BitSet falsePos1=new BitSet((int)reads);
@@ -229,8 +233,8 @@ public class CompareSamFiles {
 						SiteScore ss=new SiteScore(r.chrom, r.strand(), r.start, r.stop, 0, 0);
 						byte[] originalContig=sl.originalContig();
 						if(BLASR){
-							originalContig=(originalContig==null || Tools.indexOf(originalContig, (byte)'/')<0 ? originalContig : 
-								Arrays.copyOfRange(originalContig, 0, Tools.lastIndexOf(originalContig, (byte)'/')));
+							originalContig=(originalContig==null || Tools.indexOf(originalContig, (byte)'/')<0 ? originalContig :
+								KillSwitch.copyOfRange(originalContig, 0, Tools.lastIndexOf(originalContig, (byte)'/')));
 						}
 						int cstart=sl.originalContigStart();
 
@@ -298,8 +302,8 @@ public class CompareSamFiles {
 						SiteScore ss=new SiteScore(r.chrom, r.strand(), r.start, r.stop, 0, 0);
 						byte[] originalContig=sl.originalContig();
 						if(BLASR){
-							originalContig=(originalContig==null || Tools.indexOf(originalContig, (byte)'/')<0 ? originalContig : 
-								Arrays.copyOfRange(originalContig, 0, Tools.lastIndexOf(originalContig, (byte)'/')));
+							originalContig=(originalContig==null || Tools.indexOf(originalContig, (byte)'/')<0 ? originalContig :
+								KillSwitch.copyOfRange(originalContig, 0, Tools.lastIndexOf(originalContig, (byte)'/')));
 						}
 						int cstart=sl.originalContigStart();
 

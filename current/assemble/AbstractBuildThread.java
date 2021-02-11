@@ -2,9 +2,9 @@ package assemble;
 
 import java.util.ArrayList;
 
-import stream.ByteBuilder;
+import shared.KillSwitch;
 import stream.ConcurrentReadInputStream;
-import stream.Read;
+import structures.ByteBuilder;
 import structures.LongList;
 
 /**
@@ -26,13 +26,14 @@ abstract class AbstractBuildThread extends Thread {
 	final int mode;
 	int minCountSeedCurrent;
 
-	final int[] leftCounts=new int[4];
-	final int[] rightCounts=new int[4];
+	final int[] leftCounts=KillSwitch.allocInt1D(4);
+	final int[] rightCounts=KillSwitch.allocInt1D(4);
 	final ByteBuilder builderT=new ByteBuilder();
+//	final Contig tempContig=new Contig(null);
 	
 	final LongList insertSizes=new LongList();
 	
-	ArrayList<Read> contigs=new ArrayList<Read>();
+	ArrayList<Contig> contigs=new ArrayList<Contig>();
 	
 	long readsInT=0;
 	long basesInT=0;
