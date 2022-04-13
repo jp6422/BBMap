@@ -200,6 +200,12 @@ bloomk=31               Bloom filter kmer length.
 bloomserial=t           Use the serialized Bloom filter for greater loading
                         speed, if available.  If not, generate and write one.
 
+//jonah edit here...adding bloom array params
+fastqpath               path to Fastq file from which we will estimate key entropy
+bytesIncluded           num bytes to include in partial key
+
+
+
 Post-Filtering Parameters:
 idfilter=0              Independant of minid; sets exact minimum identity 
                         allowed for alignments to be printed.  Range 0 to 1.
@@ -347,6 +353,7 @@ calcXmx () {
 }
 calcXmx "$@"
 
+#jonah edit
 
 bbmap() {
 	local CMD="java $EA $EOOM $z $z2 $JNI -cp $CP align2.BBMap build=1 overwrite=true fastareadlen=500 $@"
