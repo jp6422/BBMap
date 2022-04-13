@@ -41,7 +41,7 @@ public abstract class AbstractMapThread extends Thread {
 			boolean QUICK_MATCH_STRINGS_, int MAX_SITESCORES_TO_PRINT_, float MINIMUM_ALIGNMENT_SCORE_RATIO_,
 			float keyDensity_, float maxKeyDensity_, float minKeyDensity_, int maxDesiredKeys_,
 			int MIN_APPROX_HITS_TO_KEEP_, boolean USE_EXTENDED_SCORE_, int BASE_HIT_SCORE_, boolean USE_AFFINE_SCORE_, int MAX_INDEL_,
-			boolean TRIM_LIST_, int TIP_DELETION_SEARCH_RANGE_, BloomFilter bloomFilter_){
+			boolean TRIM_LIST_, int TIP_DELETION_SEARCH_RANGE_, BloomFilter bloomFilter_, int[] bloomArray_){
 		
 		
 		cris=cris_;
@@ -443,6 +443,8 @@ public abstract class AbstractMapThread extends Thread {
 				readlist=ln.list;
 			}
 		}
+		// intialize bloomArray from input
+		bloomArray=bloomArray_;
 		
 		final LongList bloomBuffer=(bloomFilter==null ? null : new LongList(150));
 		while(!readlist.isEmpty()){
@@ -467,11 +469,23 @@ public abstract class AbstractMapThread extends Thread {
 				//				System.out.println("Got read: "+r.toText(false));
 				//				System.out.println("Synthetic: "+r.synthetic());
 
-
-
+				//jonah insertion here***
+				//will need to pass most entropic key indices to AbstractMapThread function  and then edit what counts as
+				//passing the bloom filter below. 
 				
-				final boolean passesBloomFilter=(bloomFilter==null ? false : bloomFilter.passes(r, r.mate, bloomBuffer, 1));
-				
+				//intialize new reads to be passed to bloom filter. going to call bloom indices bloom array
+				int[] r_bloom,r_bloom_mate = new int[bloomArray.length];
+
+				for(int i=0; i<bloomArray.length; i++){
+					
+					r_bloom[i]= r[bloomArray[i]];
+					r_bloom_mate[i]=r.mate[bloomArray[i]];
+				}
+
+				//changing this line as well to use new arrays
+				//final boolean passesBloomFilter=(bloomFilter==null ? false : bloomFilter.passes(r, r.mate, bloomBuffer, 1));
+				final boolean passesBloomFilter=(bloomFilter==null ? false : bloomFilter.passes(r_bloom, r_bloom_mate, bloomBuffer, 1));
+
 				if(passesBloomFilter){//In this case it contains no kmers shared with the reference
 					basesUsed1+=r.length();
 					basesUsed2+=r.mateLength();
