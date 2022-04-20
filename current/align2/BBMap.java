@@ -55,7 +55,7 @@ public final class BBMap extends AbstractMapper {
 
 		keyDensity=1.9f;//2.3f;
 		maxKeyDensity=3f;//4f;
-		minKeyDensity=1.5f;//1.8f;
+		minKeyDensity=1.5f;//1.8f
 		maxDesiredKeys=15;
 		
 		SLOW_ALIGN_PADDING=4;
@@ -431,7 +431,8 @@ public final class BBMap extends AbstractMapper {
 				t.stop("Loaded Bloom Filter: ");
 			}else{
 				if(bloomSerial){System.out.println("Could not read "+serialPath+", generating filter from reference.");}
-				bloomFilter=new BloomFilter(true, bloomFilterK, bloomFilterK, 1, bloomFilterHashes, bloomFilterMinHits, true);
+				//jonah...add bloomArray param
+				bloomFilter=new BloomFilter(true, bloomFilterK, bloomFilterK, 1, bloomFilterHashes, bloomFilterMinHits, true, bloomArray);
 				t.stop("Made Bloom Filter: ");
 				if(bloomSerial && !RefToIndex.NODISK && !RefToIndex.FORCE_READ_ONLY){
 //					 && serialFile.canWrite()

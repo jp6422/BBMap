@@ -201,6 +201,7 @@ bloomserial=t           Use the serialized Bloom filter for greater loading
                         speed, if available.  If not, generate and write one.
 
 //jonah edit here...adding bloom array params
+bloomArray              int array of sequences to maintain for partial key
 fastqpath               path to Fastq file from which we will estimate key entropy
 bytesIncluded           num bytes to include in partial key
 
