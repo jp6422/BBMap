@@ -1,4 +1,4 @@
-
+import pandas as pd
 import numpy as np
 import math
 import sys
@@ -14,8 +14,9 @@ def read_input(filepath):
 
     can make this more robust to dif filetypes or actually incorporate FastQC file like we might need in bash script
     """
-
-    outdata = np.loadtxt(filepath)
+    #band aid fix...easier to still have in np array format for now tho
+    outdata = pd.read_csv(filepath)
+    outdata = outdata.to_numpy()
 
     return (outdata)
 
