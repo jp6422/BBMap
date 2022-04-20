@@ -16,9 +16,9 @@ def read_input(filepath):
     """
     #band aid fix...easier to still have in np array format for now tho
     outdata = pd.read_csv(filepath)
-    outdata = outdata.to_numpy()
+    outdata2 = outdata.to_numpy()
 
-    return (outdata)
+    return (outdata2)
 
 def estimate_weighted_entropy(data_array, base_mapper):
     """
