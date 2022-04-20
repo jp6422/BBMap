@@ -241,12 +241,14 @@ public class BloomFilter implements Serializable {
 	/*--------------------------------------------------------------*/
 	/*----------------         Outer Methods        ----------------*/
 	/*--------------------------------------------------------------*/
-
+ 
 	private KCountArray7MTA load(){
 		final int cbits=bits;
 		final long totalBits=8*filterMemory;
 		final long cells=(OVERRIDE_CELLS>0 ? OVERRIDE_CELLS : totalBits/cbits);
 //		System.err.println("filterMemory="+filterMemory+", cells="+cells);
+// jonah. potentially here? in1 and in2 are being loaded but what are they? if Read class can grab correct indices
+// seems that way...have changed Kmercount7MTA accordingly
 		KCountArray7MTA kca=(KCountArray7MTA)KmerCount7MTA.makeKca(in1, in2, extra==null || extra.isEmpty() ? null : extra,
 				k, cbits, 0, cells, hashes, minq, rcomp, ecco, merge,
 				maxReads, 1, 1, 1, 1, null, 0, Shared.AMINO_IN);
@@ -266,10 +268,10 @@ public class BloomFilter implements Serializable {
 	/*--------------------------------------------------------------*/
 	/*----------------         Inner Methods        ----------------*/
 	/*--------------------------------------------------------------*/
-	
+	//jonah- modifying all passes functions to include partial key
 	public boolean passes(Read r1, Read r2, final int thresh) {
-		boolean pass=passes(r1, thresh);
-		return pass && passes(r2, thresh);
+		boolean pass=passes(r1, thresh, int[] bloomArray);
+		return pass && passes(r2, thresh, int[] bloomArray);
 	}
 	
 	public int minCount(Read r) {
@@ -405,8 +407,20 @@ public class BloomFilter implements Serializable {
 		return counted>0 ? min : -1;
 	}
 	
-	public boolean passes(Read r, final int thresh) {
+	public boolean passes(Read r, final int thresh, int[] bloomArray) {
 		if(r==null || r.length()<k+minConsecutiveMatches-1){return true;}
+		// jonah edit here. Try editing r that is used here for partial keys
+		//need to pass index to main?
+
+		//initialize partial key
+		byte [] new_r_bases = byte[bloomArray.length];
+		// create new partial key
+		for (int i=0; i<bloomArray.length; i++){
+			new_r_bases[i]=r.bases[bloomArray[i]];
+		}
+
+		// changed fina byte from r.bases to new_r.bases
+		//leave this the same for now and pass updated partial key at outermost function (map Abstract thread)
 		final byte[] bases=r.bases;
 
 		long kmer=0;
@@ -414,7 +428,7 @@ public class BloomFilter implements Serializable {
 		int len=0;
 		int streak=0;
 		
-		for(int i=0; i<bases.length; i++){
+		for(int i=0; i<new_r_bases.length; i++){
 			byte b=bases[i];
 			long x=AminoAcid.baseToNumber[b];
 			long x2=AminoAcid.baseToComplementNumber[b];
@@ -432,31 +446,38 @@ public class BloomFilter implements Serializable {
 		return true;
 	}
 	
-	public boolean matches(Read r, LongList keys, final int thresh) {
-		return !passes(r, keys, thresh);
+	//modify all matches to introduce bloom Array
+	public boolean matches(Read r, LongList keys, final int thresh, int[] bloomArray) {
+		return !passes(r, keys, thresh, bloomArray);
 	}
 	
-	public boolean matchesEither(Read r1, Read r2, LongList keys, final int thresh) {
-		boolean match=!passes(r1, keys, thresh);
-		return match || !passes(r2, keys, thresh);
+	public boolean matchesEither(Read r1, Read r2, LongList keys, final int thresh, int[] bloomArray) {
+		boolean match=!passes(r1, keys, thresh, bloomArray);
+		return match || !passes(r2, keys, thresh, bloomArray);
 	}
 	
-	public boolean passes(Read r1, Read r2, LongList keys, final int thresh) {
-		boolean pass=passes(r1, keys, thresh);
-		return pass && passes(r2, keys, thresh);
+	public boolean passes(Read r1, Read r2, LongList keys, final int thresh, int[] bloomArray) {
+		boolean pass=passes(r1, keys, thresh, bloomArray);
+		return pass && passes(r2, keys, thresh, bloomArray);
 	}
 	
-	public boolean passes(Read r, LongList keys, final int thresh) {
+	public boolean passes(Read r, LongList keys, final int thresh, int[] bloomArray) {
 		if(r==null || r.length()<k+minConsecutiveMatches-1){return true;}
-		if(minConsecutiveMatches<2){return passes(r, thresh);}
+		if(minConsecutiveMatches<2){return passes(r, thresh, bloomArray);}
 		keys.clear();
 		final byte[] bases=r.bases;
+
+		//jonah...creating partial if we do by key method rather than read
+		byte [] new_r_bases = new byte[bloomArray.length];
+		for (int i=0; i<bloomArray.length; i++){
+			new_r_bases[i]=r.bases[bloomArray[i]];
+		}
 
 		long kmer=0;
 		long rkmer=0;
 		int len=0;
 		
-		for(int i=0; i<bases.length; i++){
+		for(int i=0; i<new_r_bases.length; i++){
 			byte b=bases[i];
 			long x=AminoAcid.baseToNumber[b];
 			long x2=AminoAcid.baseToComplementNumber[b];
@@ -473,7 +494,7 @@ public class BloomFilter implements Serializable {
 		}
 		return passes(keys, thresh);
 	}
-	
+	// jonah...leave this one alone..seems that keys here is already partial
 	public boolean passes(final LongList keys, final int thresh) {
 		assert(minConsecutiveMatches>1);
 		final long[] array=keys.array;

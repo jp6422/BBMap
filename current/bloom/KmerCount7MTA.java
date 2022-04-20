@@ -90,10 +90,10 @@ public class KmerCount7MTA extends KmerCountAbstract {
 			assert(!FastaReadInputStream.SPLIT_READS);
 			FastaReadInputStream.MIN_READ_LEN=k;
 		}
-		
-		KCountArray counts=KCountArray.makeNew(1L<<kbits, 1L<<matrixbits, cbits, gap, hashes);
+		//jonah...pass bloomArray in
+		KCountArray counts=KCountArray.makeNew(1L<<kbits, 1L<<matrixbits, cbits, gap, hashes, bloomArray);
 		try {
-			counts=count(fname1, fname2, k, cbits, gap, true, false, false, false, counts);
+			counts=count(fname1, fname2, k, cbits, gap, true, false, false, false, counts, bloomArray);
 		} catch (Exception e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -208,6 +208,7 @@ public class KmerCount7MTA extends KmerCountAbstract {
 	
 	public static KCountArray makeKcaFromIndex(int k, int cbits, long cells, int hashes, boolean rcomp){
 
+		
 		final int kbits=Tools.min(2*k, 62);
 		KCountArray kca=KCountArray.makeNew(1L<<kbits, cells, cbits, 0, hashes, null, 0);
 		try {
@@ -609,8 +610,8 @@ public class KmerCount7MTA extends KmerCountAbstract {
 				return 1;
 			}
 		}
-		
-		private final void count(ConcurrentReadInputStream cris, boolean rcomp, KCountArray counts){
+		//jonah... add bloom array
+		private final void count(ConcurrentReadInputStream cris, boolean rcomp, KCountArray counts, int[] bloomArray){
 			assert(k>=1 && counts!=null);
 //			System.out.println("Waiting for list");
 			ListNum<Read> ln=cris.nextList();
@@ -642,11 +643,12 @@ public class KmerCount7MTA extends KmerCountAbstract {
 						}
 						readsProcessedLocal++;
 						
+						//jonah...adding bloomArray here too
 						if(k<=maxShortKmerLength){
-							array=addRead_Advanced(r1, counts, mask, array);
+							array=addRead_Advanced(r1, counts, mask, array, bloomArray);
 						}else{
-							addReadBig(r1, kmer);
-							addReadBig(r1.mate, kmer);
+							addReadBig(r1, kmer, bloomArray);
+							addReadBig(r1.mate, kmer, bloomArray);
 						}
 //						System.out.println(r);
 //						System.out.println("kmers hashed: "+keysCountedLocal);
@@ -702,9 +704,9 @@ public class KmerCount7MTA extends KmerCountAbstract {
 		
 		
 
-
+		//jonah...added bloomArray
 		private final void count(final ConcurrentReadInputStream cris, final boolean rcomp,
-				final KCountArray count, final KCountArray trusted, final int thresh, final int detectStepsize, final boolean conservative){
+				final KCountArray count, final KCountArray trusted, final int thresh, final int detectStepsize, final boolean conservative, int[] bloomArray){
 			if(count.gap>0){
 				countFastqSplit(cris, k, rcomp, count, trusted, thresh, detectStepsize, conservative);
 				return;
@@ -765,7 +767,7 @@ public class KmerCount7MTA extends KmerCountAbstract {
 							}
 						}
 					}
-					array=addRead_Advanced(r1, count, mask, array);
+					array=addRead_Advanced(r1, count, mask, array, bloomArray);
 
 				}
 				//System.err.println("returning list");
@@ -872,7 +874,8 @@ public class KmerCount7MTA extends KmerCountAbstract {
 		 * @param mask
 		 * @param rcomp
 		 */
-		private final long[] addRead_Advanced(Read r1, final KCountArray counts, final long mask, long[] array){
+		 //jonah...add bloomArray
+		private final long[] addRead_Advanced(Read r1, final KCountArray counts, final long mask, long[] array, int[] bloomArray){
 			assert(counts.gap==0) : "Gapped: TODO";
 			if(PREJOIN && r1.mate!=null && r1.insert()>0){
 				r1.mate.reverseComplement();
@@ -900,29 +903,41 @@ public class KmerCount7MTA extends KmerCountAbstract {
 					}
 				}
 			}else{
-				if(len1>0){addRead(r1);}
-				if(len2>0){addRead(r2);}
+				//jonah..add bloom array here
+				if(len1>0){addRead(r1, bloomArray);}
+				if(len2>0){addRead(r2, bloomArray);}
 			}
 			return array;
 		}
-		
-		private final void addReadBig(Read r, Kmer kmer){
+		//also need to add index variable here (bloom array)
+		private final void addReadBig(Read r, Kmer kmer, int[] bloomArray){
 			if(r==null || r.bases==null){return;}
+			//jonah...just change byte array of bases here for hashing
 			final byte[] bases=r.bases;
 			final byte[] quals=r.quality;
+			//jonah
+			byte[] basesNew = new byte[bloomArray.length];
+			byte[] newQuals = new byte[bloomArray.length];
+
+			for (int i=0; i<bloomArray.length; i++){
+				basesNew[i]=r.bases[bloomArray[i]];
+				newQuals[i]=r.quals[bloomArray[i]];
+			}
 			int len=0;
-			
-			if(bases==null || bases.length<k){return;}
+			//jonah
+			if(basesNew==null || basesNew.length<k){return;}
 			kmer.clear();
 			
 			/* Loop through the bases, maintaining a forward and reverse kmer via bitshifts */
 			float prob=1;
-			for(int i=0; i<bases.length; i++){
-				final byte b=bases[i];
+			//jonah
+			for(int i=0; i<basesNew.length; i++){
+				final byte b= basesNew[i];
 				final long x=AminoAcid.baseToNumber[b];
 
 				//Update kmers
 				kmer.addRight(b);
+
 				
 				if(minProb>0 && quals!=null){//Update probability
 					prob=prob*KmerTableSet.PROB_CORRECT[quals[i]];
@@ -1071,8 +1086,8 @@ public class KmerCount7MTA extends KmerCountAbstract {
 				r.reverseComplement();
 			}
 		}
-		
-		private final void addRead(Read r){
+		//add bloomArray
+		private final void addRead(Read r, int[] bloomArray){
 			if(amino){
 				addReadAmino(r);
 				return;
@@ -1085,7 +1100,16 @@ public class KmerCount7MTA extends KmerCountAbstract {
 			final byte[] bases=r.bases;
 			final byte[] quals=r.quality;
 
-			if(bases==null || bases.length<k+counts.gap){return;}
+			//jonah
+			byte[] basesNew = new byte[bloomArray.length];
+			byte[] newQuals = new byte[bloomArray.length];
+
+			for (int i=0; i<bloomArray.length; i++){
+				basesNew[i]=r.bases[bloomArray[i]];
+				newQuals[i]=r.quals[bloomArray[i]];
+			}
+			//jonah
+			if(basesNew==null || basesNew.length<k+counts.gap){return;}
 			
 			final int shift=2*k;
 			final int shift2=shift-2;
@@ -1094,9 +1118,9 @@ public class KmerCount7MTA extends KmerCountAbstract {
 			long rkmer=0;
 			int len=0;
 			float prob=1;
-
-			for(int i=0; i<bases.length; i++){
-				final byte b=bases[i];
+			//jonah
+			for(int i=0; i<basesNew.length; i++){
+				final byte b=basesNew[i];
 				long x=AminoAcid.baseToNumber[b];
 				long x2=AminoAcid.baseToComplementNumber[b];
 				kmer=((kmer<<2)|x)&mask;
@@ -1106,7 +1130,8 @@ public class KmerCount7MTA extends KmerCountAbstract {
 				if(quals==null){
 					q=50;
 				}else{
-					q=quals[i];
+					//jonah
+					q=newQuals[i];
 					prob=prob*align2.QualityTools.PROB_CORRECT[q];
 					if(len>k){
 						byte oldq=quals[i-k];

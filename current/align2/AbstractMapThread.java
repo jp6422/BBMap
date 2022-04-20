@@ -41,7 +41,7 @@ public abstract class AbstractMapThread extends Thread {
 			boolean QUICK_MATCH_STRINGS_, int MAX_SITESCORES_TO_PRINT_, float MINIMUM_ALIGNMENT_SCORE_RATIO_,
 			float keyDensity_, float maxKeyDensity_, float minKeyDensity_, int maxDesiredKeys_,
 			int MIN_APPROX_HITS_TO_KEEP_, boolean USE_EXTENDED_SCORE_, int BASE_HIT_SCORE_, boolean USE_AFFINE_SCORE_, int MAX_INDEL_,
-			boolean TRIM_LIST_, int TIP_DELETION_SEARCH_RANGE_, BloomFilter bloomFilter_, int[] bloomArray_){
+			boolean TRIM_LIST_, int TIP_DELETION_SEARCH_RANGE_, BloomFilter bloomFilter_, int bloomArray_){
 		
 		
 		cris=cris_;
@@ -443,12 +443,13 @@ public abstract class AbstractMapThread extends Thread {
 				readlist=ln.list;
 			}
 		}
-		// intialize bloomArray from input
+		// jonah intialize bloomArray from input
 		bloomArray=bloomArray_;
 		
 		final LongList bloomBuffer=(bloomFilter==null ? null : new LongList(150));
 		while(!readlist.isEmpty()){
 			
+			//jonah guessing this makes sure all reads are same size in order to hash. necessary?
 			if(MAX_READ_LENGTH>0 || MIN_READ_LENGTH>0){
 				Tools.breakReads(readlist, MAX_READ_LENGTH, MIN_READ_LENGTH, verbose ? System.err : null);
 			}
@@ -474,17 +475,18 @@ public abstract class AbstractMapThread extends Thread {
 				//passing the bloom filter below. 
 				
 				//intialize new reads to be passed to bloom filter. going to call bloom indices bloom array
-				int[] r_bloom,r_bloom_mate = new int[bloomArray.length];
+				//going to do this in bloomFilter.passes
+				// byte[] r_bloom,r_bloom_mate = new byte[bloomArray.length];
 
-				for(int i=0; i<bloomArray.length; i++){
+				// for(int i=0; i<bloomArray.length; i++){
 					
-					r_bloom[i]= r[bloomArray[i]];
-					r_bloom_mate[i]=r.mate[bloomArray[i]];
-				}
+				// 	r_bloom[i]= r.bases[bloomArray[i]];
+				// 	r_bloom_mate[i]=r.mate.bases[bloomArray[i]];
+				// }
 
-				//changing this line as well to use new arrays
-				//final boolean passesBloomFilter=(bloomFilter==null ? false : bloomFilter.passes(r, r.mate, bloomBuffer, 1));
-				final boolean passesBloomFilter=(bloomFilter==null ? false : bloomFilter.passes(r_bloom, r_bloom_mate, bloomBuffer, 1));
+				//changing this line as well to make use of bloomArray
+				final boolean passesBloomFilter=(bloomFilter==null ? false : bloomFilter.passes(r, r.mate, bloomBuffer, 1, bloomArray));
+				//final boolean passesBloomFilter=(bloomFilter==null ? false : bloomFilter.passes(r_bloom, r_bloom_mate, bloomBuffer, 1));
 
 				if(passesBloomFilter){//In this case it contains no kmers shared with the reference
 					basesUsed1+=r.length();
