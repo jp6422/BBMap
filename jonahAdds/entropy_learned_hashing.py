@@ -15,7 +15,7 @@ def read_input(filepath):
     can make this more robust to dif filetypes or actually incorporate FastQC file like we might need in bash script
     """
 
-    outdata = np.read_csv(filepath)
+    outdata = np.loadtxt(filepath)
 
     return (outdata)
 
