@@ -67,6 +67,7 @@ def estimate_weighted_entropy(data_array, base_mapper):
     #return sorted entropy array (desc) and array of bytes by entropy (desc) 
     return entropy_array[[np.argsort(-entropy_array)]], np.array(range(len(data_array[0,0])))[[np.argsort(-entropy_array)]]
 
+   
 
 def base_mapper(base):
 
@@ -111,7 +112,16 @@ def weighted_next_byte (data_matrix):
             if table_key in count_table:
                 count_table[table_key]+=float(data_matrix[i,2])
 
-            
+
+def main(csv_filepath, array_curoff):
+
+    data_array = read_input(csv_filepath)
+
+    a,b = estimate_weighted_entropy(data_array)
+
+    return b[:array_cutoff]
+
+
 if __name__ == "__main__":
 
     csv_filepath = sys.argv[1]
@@ -121,7 +131,7 @@ if __name__ == "__main__":
 
     entropies, bytes = estimate_weighted_entropy(data_array, base_mapper)
 
-    return bytes[:array_cutoff]
+    main (csv_filepath, array_cutoff))
 
 
 
