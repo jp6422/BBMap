@@ -131,7 +131,7 @@ if __name__ == "__main__":
 
     entropies, bytes = estimate_weighted_entropy(data_array, base_mapper)
 
-    main (csv_filepath, array_cutoff))
+    main (csv_filepath, array_cutoff)
 
 
 
